@@ -20,8 +20,10 @@ pub fn main(init: std.process.Init) !void {
     if (opts.show_help) { cli.printHelp(); return; }
     if (opts.show_version) { cli.printVersion(); return; }
 
-    // load config
-    const config = try config_mod.loadFromFile(gpa, io, opts.config_path);
+    // load config (all config allocations live in config_arena)
+    var config_arena = std.heap.ArenaAllocator.init(gpa);
+    defer config_arena.deinit();
+    const config = try config_mod.loadFromFile(config_arena.allocator(), io, opts.config_path);
 
     // load all embedded wordlists (in arena — long-lived)
     var embedded = try wordlist_mod.loadAll(arena);
@@ -33,6 +35,13 @@ pub fn main(init: std.process.Init) !void {
 
     // load project wordlists
     const project_wordlists = try checker_mod.loadProjectWordlists(gpa, io);
+    defer {
+        for (project_wordlists) |wl| {
+            gpa.free(wl.name);
+            wl.deinit(gpa);
+        }
+        gpa.free(project_wordlists);
+    }
 
     // discover files
     var fl = file_list_mod.FileList.init(gpa, io, &config, opts.suppress_file_rules);
