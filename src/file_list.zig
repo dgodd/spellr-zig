@@ -144,9 +144,8 @@ pub const FileList = struct {
             };
             if (!containsId(ids.items, locale_id)) try ids.append(self.allocator, locale_id);
         }
-        const baseline_len = ids.items.len; // english + locale(s), before any language match
-
         // match language-specific wordlists
+        var has_language_match = false;
         const base = std.fs.path.basename(path);
         for (self.config.languages) |lang| {
             if (std.mem.eql(u8, lang.name, "english") or std.mem.eql(u8, lang.name, "spellr")) continue;
@@ -161,6 +160,7 @@ pub const FileList = struct {
                 matched = self.matchesHashbang(path, lang.hashbangs);
             }
             if (matched) {
+                has_language_match = true;
                 if (wordlistIdForLang(lang.name)) |wid| {
                     if (!containsId(ids.items, wid)) try ids.append(self.allocator, wid);
                 }
@@ -168,7 +168,7 @@ pub const FileList = struct {
         }
 
         // No language matched — skip the file (English only applies alongside a matched language)
-        if (ids.items.len == baseline_len) {
+        if (!has_language_match) {
             ids.deinit(self.allocator);
             return null;
         }

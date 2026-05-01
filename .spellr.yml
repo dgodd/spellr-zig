@@ -1,10 +1,12 @@
 ---
 excludes:
-  - wordlists/*
+  - /wordlists/*
+  - /.zig-cache/
+  - /zig-out/
 languages:
   lorem:
     includes:
       - .spellr.yml
   zig:
     includes:
-      - '*.zig'
+      - "*.zig"

@@ -47,7 +47,7 @@ const SHELL_HASHBANGS = [_][]const u8{ "bash", "sh" };
 const DOCKERFILE_INCLUDES = [_][]const u8{"Dockerfile"};
 const CSS_INCLUDES = [_][]const u8{ "*.css", "*.sass", "*.scss", "*.less" };
 const XML_INCLUDES = [_][]const u8{ "*.xml", "*.html", "*.haml", "*.hml", "*.svg" };
-const ZIG_INCLUDES = [_][]const u8{"*.zig"};
+const ZIG_INCLUDES = [_][]const u8{ "*.zig", "*.zon" };
 const EMPTY_INCLUDES = [_][]const u8{};
 const EMPTY_HASHBANGS = [_][]const u8{};
 const DEFAULT_ENGLISH_LOCALES = [_]Locale{.US};
@@ -101,6 +101,10 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
     var pending_includes = std.ArrayList([]const u8).empty;
     var pending_locales = std.ArrayList(Locale).empty;
 
+    // Working list of languages — seeded from defaults, may grow with custom entries.
+    var lang_list = std.ArrayList(LanguageConfig).empty;
+    try lang_list.appendSlice(allocator, config.languages);
+
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r ");
         if (line.len == 0 or line[0] == '#') continue;
@@ -110,7 +114,7 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
         const trimmed = line[indent..];
 
         if (indent == 0) {
-            try flushLang(allocator, config, current_lang_idx, &pending_includes, &pending_locales);
+            try flushLangInList(allocator, &lang_list, current_lang_idx, &pending_includes, &pending_locales);
             section = .none;
             current_lang_idx = null;
             in_lang_includes = false;
@@ -141,12 +145,22 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
             },
             .languages => {
                 if (indent == 2 and std.mem.endsWith(u8, trimmed, ":") and !std.mem.startsWith(u8, trimmed, "-")) {
-                    // Start of a new language block — flush the previous one.
-                    try flushLang(allocator, config, current_lang_idx, &pending_includes, &pending_locales);
+                    try flushLangInList(allocator, &lang_list, current_lang_idx, &pending_includes, &pending_locales);
                     in_lang_includes = false;
                     in_lang_locale = false;
                     const lang_name = trimmed[0 .. trimmed.len - 1];
-                    current_lang_idx = findLangIdx(config, lang_name);
+                    current_lang_idx = findLangIdxInList(lang_list.items, lang_name);
+                    if (current_lang_idx == null) {
+                        // Custom language not in defaults — create a new entry.
+                        try lang_list.append(allocator, .{
+                            .name = try allocator.dupe(u8, lang_name),
+                            .includes = &[_][]const u8{},
+                            .hashbangs = &[_][]const u8{},
+                            .locales = &[_]Locale{},
+                            .addable = false,
+                        });
+                        current_lang_idx = lang_list.items.len - 1;
+                    }
                 } else if (indent == 4) {
                     if (in_lang_includes and !std.mem.startsWith(u8, trimmed, "-")) {
                         in_lang_includes = false;
@@ -155,13 +169,13 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
                     if (std.mem.startsWith(u8, trimmed, "includes:")) {
                         in_lang_includes = true;
                     } else if (std.mem.startsWith(u8, trimmed, "locale:")) {
-                        // Scalar form: `locale: AU`
                         if (parseKV(trimmed, "locale")) |v| {
                             if (v.len > 0) try pending_locales.append(allocator, parseLocale(v));
                         } else {
-                            in_lang_locale = true; // list form follows at indent 6
+                            in_lang_locale = true;
                         }
                     }
+                    // other keys (key:, addable:, hashbangs:) are silently ignored
                 } else if (indent >= 6 and std.mem.startsWith(u8, trimmed, "- ")) {
                     const item = parseListItem(trimmed[2..]);
                     if (item.len == 0) {} else if (in_lang_includes) {
@@ -174,11 +188,12 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
         }
     }
 
-    try flushLang(allocator, config, current_lang_idx, &pending_includes, &pending_locales);
-    // Discard unflushed items (language not in config).
+    try flushLangInList(allocator, &lang_list, current_lang_idx, &pending_includes, &pending_locales);
     for (pending_includes.items) |item| allocator.free(item);
     pending_includes.deinit(allocator);
     pending_locales.deinit(allocator);
+
+    config.languages = try lang_list.toOwnedSlice(allocator);
 
     if (extra_excludes.items.len > 0) {
         var combined = std.ArrayList([]const u8).empty;
@@ -188,9 +203,9 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
     }
 }
 
-fn flushLang(
+fn flushLangInList(
     allocator: std.mem.Allocator,
-    config: *Config,
+    lang_list: *std.ArrayList(LanguageConfig),
     lang_idx: ?usize,
     pending_includes: *std.ArrayList([]const u8),
     pending_locales: *std.ArrayList(Locale),
@@ -198,13 +213,13 @@ fn flushLang(
     if (lang_idx) |idx| {
         if (pending_includes.items.len > 0) {
             var combined = std.ArrayList([]const u8).empty;
-            try combined.appendSlice(allocator, config.languages[idx].includes);
+            try combined.appendSlice(allocator, lang_list.items[idx].includes);
             try combined.appendSlice(allocator, pending_includes.items);
-            config.languages[idx].includes = try combined.toOwnedSlice(allocator);
+            lang_list.items[idx].includes = try combined.toOwnedSlice(allocator);
             pending_includes.clearRetainingCapacity();
         }
-        if (pending_locales.items.len > 0 and std.mem.eql(u8, config.languages[idx].name, "english"))
-            config.languages[idx].locales = try pending_locales.toOwnedSlice(allocator);
+        if (pending_locales.items.len > 0 and std.mem.eql(u8, lang_list.items[idx].name, "english"))
+            lang_list.items[idx].locales = try pending_locales.toOwnedSlice(allocator);
     } else {
         for (pending_includes.items) |item| allocator.free(item);
         pending_includes.clearRetainingCapacity();
@@ -212,8 +227,8 @@ fn flushLang(
     pending_locales.clearRetainingCapacity();
 }
 
-fn findLangIdx(config: *const Config, name: []const u8) ?usize {
-    for (config.languages, 0..) |lang, i| {
+fn findLangIdxInList(languages: []const LanguageConfig, name: []const u8) ?usize {
+    for (languages, 0..) |lang, i| {
         if (std.mem.eql(u8, lang.name, name)) return i;
     }
     return null;
