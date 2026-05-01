@@ -405,10 +405,16 @@ pub const LineTokenizer = struct {
                     }
                     i = k;
                     // Extend through apostrophe contractions: DOESN'T, WON'T, etc.
+                    // But not D'Santos — when the uppercase run is followed by a lowercase letter,
+                    // it's a TitleCase word start, not a contraction.
                     if (start + i < self.line.len and self.line[start + i] == '\'') {
                         var j = i + 1;
                         while (start + j < self.line.len and isUpper(self.line[start + j])) j += 1;
-                        if (j > i + 1) i = j;
+                        if (j > i + 1) {
+                            const after = start + j;
+                            const title_case_follows = after < self.line.len and isLower(self.line[after]);
+                            if (!title_case_follows) i = j;
+                        }
                     }
                 },
                 else => unreachable,
@@ -769,5 +775,22 @@ test "center not split" {
     var tok = LineTokenizer.initDefault("    %center", 1, 3, true);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("center", t1.text);
+    try std.testing.expect(tok.next() == null);
+}
+
+test "UPPER apostrophe contraction extends token" {
+    // DOESN'T should be a single token
+    var tok = LineTokenizer.initDefault("DOESN'T", 1, 3, false);
+    const t1 = tok.next().?;
+    try std.testing.expectEqualStrings("DOESN'T", t1.text);
+    try std.testing.expect(tok.next() == null);
+}
+
+test "TitleCase after apostrophe is not absorbed into UPPER token" {
+    // D'Santos: "D" is too short (< word_min_len 3), then "Santos" is a separate token
+    var tok = LineTokenizer.initDefault("D'Santos", 1, 3, false);
+    const t1 = tok.next().?;
+    try std.testing.expectEqualStrings("Santos", t1.text);
+    try std.testing.expect(t1.case_kind == .title);
     try std.testing.expect(tok.next() == null);
 }
