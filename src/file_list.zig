@@ -127,13 +127,20 @@ pub const FileList = struct {
         // always add english + all applicable locale wordlists
         var english_locales: []const Locale = &.{.US};
         for (self.config.languages) |lang| {
-            if (std.mem.eql(u8, lang.name, "english")) { english_locales = lang.locales; break; }
+            if (std.mem.eql(u8, lang.name, "english")) {
+                english_locales = lang.locales;
+                break;
+            }
         }
         try ids.append(self.allocator, .english);
         for (english_locales) |loc| {
             const locale_id: WordlistId = switch (loc) {
-                .US => .english_us, .AU => .english_au, .CA => .english_ca,
-                .GB => .english_gb, .GBs => .english_gbs, .GBz => .english_gbz,
+                .US => .english_us,
+                .AU => .english_au,
+                .CA => .english_ca,
+                .GB => .english_gb,
+                .GBs => .english_gbs,
+                .GBz => .english_gbz,
             };
             if (!containsId(ids.items, locale_id)) try ids.append(self.allocator, locale_id);
         }
@@ -145,7 +152,10 @@ pub const FileList = struct {
             if (std.mem.eql(u8, lang.name, "english") or std.mem.eql(u8, lang.name, "spellr")) continue;
             var matched = false;
             for (lang.includes) |pattern| {
-                if (globMatch(pattern, base) or globMatch(pattern, path)) { matched = true; break; }
+                if (globMatch(pattern, base) or globMatch(pattern, path)) {
+                    matched = true;
+                    break;
+                }
             }
             if (!matched and lang.hashbangs.len > 0) {
                 matched = self.matchesHashbang(path, lang.hashbangs);
@@ -220,11 +230,17 @@ fn globMatchInner(pattern: []const u8, str: []const u8) bool {
     var has_star = false;
     while (si < str.len) {
         if (pi < pattern.len and (pattern[pi] == str[si] or pattern[pi] == '?')) {
-            pi += 1; si += 1;
+            pi += 1;
+            si += 1;
         } else if (pi < pattern.len and pattern[pi] == '*') {
-            has_star = true; star_pi = pi + 1; star_si = si; pi += 1;
+            has_star = true;
+            star_pi = pi + 1;
+            star_si = si;
+            pi += 1;
         } else if (has_star) {
-            pi = star_pi; star_si += 1; si = star_si;
+            pi = star_pi;
+            star_si += 1;
+            si = star_si;
         } else return false;
     }
     while (pi < pattern.len and pattern[pi] == '*') pi += 1;

@@ -38,7 +38,8 @@ pub fn parse(allocator: std.mem.Allocator, args: []const [:0]const u8) !Options 
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--interactive") or std.mem.eql(u8, arg, "-i")) {
-            opts.mode = .interactive; opts.parallel = false;
+            opts.mode = .interactive;
+            opts.parallel = false;
         } else if (std.mem.eql(u8, arg, "--autocorrect") or std.mem.eql(u8, arg, "-a")) {
             opts.mode = .autocorrect;
         } else if (std.mem.eql(u8, arg, "--wordlist") or std.mem.eql(u8, arg, "-w")) {

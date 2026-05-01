@@ -228,27 +228,46 @@ pub const LineTokenizer = struct {
         if (startsWith(s, "SG.")) {
             var i: usize = 3;
             var n: usize = 0;
-            while (i < s.len and isWordChar(s[i])) { i += 1; n += 1; }
+            while (i < s.len and isWordChar(s[i])) {
+                i += 1;
+                n += 1;
+            }
             if (n == 22 and i < s.len and s[i] == '.') {
-                i += 1; n = 0;
-                while (i < s.len and isWordChar(s[i])) { i += 1; n += 1; }
-                if (n == 43) { self.pos += i; return true; }
+                i += 1;
+                n = 0;
+                while (i < s.len and isWordChar(s[i])) {
+                    i += 1;
+                    n += 1;
+                }
+                if (n == 43) {
+                    self.pos += i;
+                    return true;
+                }
             }
         }
         // Hyperwallet: prg-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
         if (startsWith(s, "prg-")) {
-            if (matchHyperwallet(s)) |n| { self.pos += n; return true; }
+            if (matchHyperwallet(s)) |n| {
+                self.pos += n;
+                return true;
+            }
         }
         // GTM-XXXXXXX
         if (startsWith(s, "GTM-")) {
             var i: usize = 4;
             var n: usize = 0;
-            while (i < s.len and std.ascii.isAlphanumeric(s[i])) { i += 1; n += 1; }
-            if (n == 7) { self.pos += i; return true; }
+            while (i < s.len and std.ascii.isAlphanumeric(s[i])) {
+                i += 1;
+                n += 1;
+            }
+            if (n == 7) {
+                self.pos += i;
+                return true;
+            }
         }
         // sha<N>-<base64> SRI hashes
         const sha_sizes = [_]struct { prefix: []const u8, b64_len: usize }{
-            .{ .prefix = "sha1-",   .b64_len = 28 },
+            .{ .prefix = "sha1-", .b64_len = 28 },
             .{ .prefix = "sha256-", .b64_len = 44 },
             .{ .prefix = "sha384-", .b64_len = 64 },
             .{ .prefix = "sha512-", .b64_len = 88 },
@@ -257,13 +276,22 @@ pub const LineTokenizer = struct {
             if (startsWith(s, sha.prefix)) {
                 var i: usize = sha.prefix.len;
                 var n: usize = 0;
-                while (i < s.len and isBase64Char(s[i])) { i += 1; n += 1; }
-                if (n == sha.b64_len) { self.pos += i; return true; }
+                while (i < s.len and isBase64Char(s[i])) {
+                    i += 1;
+                    n += 1;
+                }
+                if (n == sha.b64_len) {
+                    self.pos += i;
+                    return true;
+                }
             }
         }
         // data:mime;base64,...
         if (startsWith(s, "data:")) {
-            if (matchDataUrl(s)) |n| { self.pos += n; return true; }
+            if (matchDataUrl(s)) |n| {
+                self.pos += n;
+                return true;
+            }
         }
         return false;
     }
@@ -443,19 +471,37 @@ fn isUnicodeAdjacent(line: []const u8, start: usize, end: usize) bool {
 fn isAlpha(c: u8) bool {
     return std.ascii.isAlphabetic(c);
 }
-fn isUpper(c: u8) bool { return c >= 'A' and c <= 'Z'; }
-fn isLower(c: u8) bool { return c >= 'a' and c <= 'z'; }
-fn isHexDigit(c: u8) bool { return std.ascii.isHex(c); }
-fn isWordChar(c: u8) bool { return std.ascii.isAlphanumeric(c) or c == '-' or c == '_'; }
-fn isBase64Char(c: u8) bool { return std.ascii.isAlphanumeric(c) or c == '+' or c == '/' or c == '='; }
-fn startsWith(s: []const u8, prefix: []const u8) bool { return std.mem.startsWith(u8, s, prefix); }
+fn isUpper(c: u8) bool {
+    return c >= 'A' and c <= 'Z';
+}
+fn isLower(c: u8) bool {
+    return c >= 'a' and c <= 'z';
+}
+fn isHexDigit(c: u8) bool {
+    return std.ascii.isHex(c);
+}
+fn isWordChar(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '-' or c == '_';
+}
+fn isBase64Char(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '+' or c == '/' or c == '=';
+}
+fn startsWith(s: []const u8, prefix: []const u8) bool {
+    return std.mem.startsWith(u8, s, prefix);
+}
 
-fn isApostrophe(c: u8) bool { return c == '\'' or c == 0xE2; } // ASCII ' or start of UTF-8 curly quote
-fn utf8ApostropheLen(c: u8) usize { return if (c == '\'') 1 else 3; } // curly quote is 3 bytes
+fn isApostrophe(c: u8) bool {
+    return c == '\'' or c == 0xE2;
+} // ASCII ' or start of UTF-8 curly quote
+fn utf8ApostropheLen(c: u8) usize {
+    return if (c == '\'') 1 else 3;
+} // curly quote is 3 bytes
 
 fn hasMinAlpha(s: []const u8, min: usize) bool {
     var n: usize = 0;
-    for (s) |c| if (std.ascii.isAlphabetic(c)) { n += 1; };
+    for (s) |c| if (std.ascii.isAlphabetic(c)) {
+        n += 1;
+    };
     return n >= min;
 }
 
@@ -474,11 +520,17 @@ fn possibleKeySpan(s: []const u8) ?[]const u8 {
     while (i < s.len) {
         const c = s[i];
         if (std.ascii.isAlphabetic(c)) {
-            if (!in_alpha) { sections += 1; in_alpha = true; }
+            if (!in_alpha) {
+                sections += 1;
+                in_alpha = true;
+            }
             has_alpha = true;
             i += 1;
         } else if (std.ascii.isDigit(c)) {
-            if (in_alpha) { sections += 1; in_alpha = false; }
+            if (in_alpha) {
+                sections += 1;
+                in_alpha = false;
+            }
             has_digit = true;
             i += 1;
         } else if (c == '-' or c == '_' or c == '/' or c == '+') {
@@ -524,7 +576,10 @@ fn skipHostname(s: []const u8) usize {
         const start = i;
         while (i < s.len and std.ascii.isDigit(s[i])) i += 1;
         if (i == start) break;
-        if (i < s.len and s[i] == '.') { dots += 1; i += 1; } else break;
+        if (i < s.len and s[i] == '.') {
+            dots += 1;
+            i += 1;
+        } else break;
     }
     if (dots == 3 and i > 0) return i - 1; // IP match
 
@@ -535,7 +590,10 @@ fn skipHostname(s: []const u8) usize {
         const start = i;
         while (i < s.len and (std.ascii.isAlphanumeric(s[i]) or s[i] == '-' or s[i] == '\\')) i += 1;
         if (i == start) break;
-        if (i < s.len and s[i] == '.') { has_dot = true; i += 1; } else break;
+        if (i < s.len and s[i] == '.') {
+            has_dot = true;
+            i += 1;
+        } else break;
     }
     // trim trailing dot
     if (i > 0 and s[i - 1] == '.') i -= 1;

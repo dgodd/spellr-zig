@@ -93,7 +93,9 @@ pub const Reporter = struct {
                 var it = self.wordlist_words.keyIterator();
                 while (it.next()) |k| try words.append(self.allocator, k.*);
                 std.sort.pdq([]const u8, words.items, {}, struct {
-                    fn lt(_: void, a: []const u8, b: []const u8) bool { return std.mem.lessThan(u8, a, b); }
+                    fn lt(_: void, a: []const u8, b: []const u8) bool {
+                        return std.mem.lessThan(u8, a, b);
+                    }
                 }.lt);
                 var buf: [4096]u8 = undefined;
                 var out: Io.File.Writer = .init(.stdout(), self.io, &buf);
@@ -130,7 +132,10 @@ pub const Reporter = struct {
         if (self.replace_all.get(norm)) |r| return .{ .replace = try self.allocator.dupe(u8, r) };
 
         const suggs = try suggester.suggestions(self.allocator, miss.token, wordlists);
-        defer { for (suggs) |s| self.allocator.free(s); self.allocator.free(suggs); }
+        defer {
+            for (suggs) |s| self.allocator.free(s);
+            self.allocator.free(suggs);
+        }
 
         const col = miss.token.col;
         const before = std.mem.trimStart(u8, miss.line_text[0..col], " \t");
@@ -180,7 +185,10 @@ pub const Reporter = struct {
 
     fn autocorrect(self: *Reporter, miss: Miss, wordlists: []*const Wordlist) !ReportAction {
         const suggs = try suggester.suggestions(self.allocator, miss.token, wordlists);
-        defer { for (suggs) |s| self.allocator.free(s); self.allocator.free(suggs); }
+        defer {
+            for (suggs) |s| self.allocator.free(s);
+            self.allocator.free(suggs);
+        }
         if (suggs.len == 0) {
             var buf: [512]u8 = undefined;
             var w: Io.File.Writer = .init(.stderr(), self.io, &buf);

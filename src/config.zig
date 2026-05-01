@@ -20,24 +20,26 @@ pub const Config = struct {
 };
 
 const DEFAULT_EXCLUDES = [_][]const u8{
-    ".git/", ".spellr_wordlists/", ".DS_Store", "Gemfile.lock",
-    ".rspec_status", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.ico",
-    ".gitkeep", ".keep", "*.svg", "*.eot", "*.ttf", "*.woff", "*.woff2",
-    "*.zip", "*.pdf", "*.xlsx", "*.gz",
+    ".git/",         ".spellr_wordlists/", ".DS_Store", "Gemfile.lock",
+    ".rspec_status", "*.png",              "*.jpg",     "*.jpeg",
+    "*.gif",         "*.ico",              ".gitkeep",  ".keep",
+    "*.svg",         "*.eot",              "*.ttf",     "*.woff",
+    "*.woff2",       "*.zip",              "*.pdf",     "*.xlsx",
+    "*.gz",
 };
 
 const RUBY_INCLUDES = [_][]const u8{
-    "*.rb", "*.rake", "*.gemspec", "*.erb", "*.haml", "*.jbuilder",
-    "*.builder", "Gemfile", "Rakefile", "config.ru", "Capfile", ".simplecov",
+    "*.rb",      "*.rake",  "*.gemspec", "*.erb",     "*.haml",  "*.jbuilder",
+    "*.builder", "Gemfile", "Rakefile",  "config.ru", "Capfile", ".simplecov",
 };
 const RUBY_HASHBANGS = [_][]const u8{"ruby"};
 const HTML_INCLUDES = [_][]const u8{
-    "*.html", "*.hml", "*.jsx", "*.tsx", "*.js", "*.ts",
-    "*.jsx.snap", "*.tsx.snap", "*.coffee", "*.haml", "*.erb",
-    "*.rb", "*.builder", "*.css", "*.scss", "*.sass", "*.less",
+    "*.html",     "*.hml",      "*.jsx",    "*.tsx",  "*.js",   "*.ts",
+    "*.jsx.snap", "*.tsx.snap", "*.coffee", "*.haml", "*.erb",  "*.rb",
+    "*.builder",  "*.css",      "*.scss",   "*.sass", "*.less",
 };
 const JS_INCLUDES = [_][]const u8{
-    "*.html", "*.hml", "*.jsx", "*.tsx", "*.js", "*.ts",
+    "*.html",     "*.hml",      "*.jsx",    "*.tsx",  "*.js",  "*.ts",
     "*.jsx.snap", "*.tsx.snap", "*.coffee", "*.haml", "*.erb", "*.json",
 };
 const SHELL_INCLUDES = [_][]const u8{ "*.sh", "Dockerfile" };
@@ -45,21 +47,23 @@ const SHELL_HASHBANGS = [_][]const u8{ "bash", "sh" };
 const DOCKERFILE_INCLUDES = [_][]const u8{"Dockerfile"};
 const CSS_INCLUDES = [_][]const u8{ "*.css", "*.sass", "*.scss", "*.less" };
 const XML_INCLUDES = [_][]const u8{ "*.xml", "*.html", "*.haml", "*.hml", "*.svg" };
+const ZIG_INCLUDES = [_][]const u8{"*.zig"};
 const EMPTY_INCLUDES = [_][]const u8{};
 const EMPTY_HASHBANGS = [_][]const u8{};
 const DEFAULT_ENGLISH_LOCALES = [_]Locale{.US};
 const EMPTY_LOCALES = [_]Locale{};
 
 var DEFAULT_LANGUAGES = [_]LanguageConfig{
-    .{ .name = "english",    .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locales = &DEFAULT_ENGLISH_LOCALES, .addable = true },
-    .{ .name = "ruby",       .includes = &RUBY_INCLUDES,        .hashbangs = &RUBY_HASHBANGS,   .locales = &EMPTY_LOCALES,           .addable = true },
-    .{ .name = "html",       .includes = &HTML_INCLUDES,        .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
-    .{ .name = "javascript", .includes = &JS_INCLUDES,          .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
-    .{ .name = "shell",      .includes = &SHELL_INCLUDES,       .hashbangs = &SHELL_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
-    .{ .name = "dockerfile", .includes = &DOCKERFILE_INCLUDES,  .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
-    .{ .name = "css",        .includes = &CSS_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
-    .{ .name = "xml",        .includes = &XML_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
-    .{ .name = "spellr",     .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = false },
+    .{ .name = "english", .includes = &EMPTY_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &DEFAULT_ENGLISH_LOCALES, .addable = true },
+    .{ .name = "ruby", .includes = &RUBY_INCLUDES, .hashbangs = &RUBY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "html", .includes = &HTML_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "javascript", .includes = &JS_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "shell", .includes = &SHELL_INCLUDES, .hashbangs = &SHELL_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "dockerfile", .includes = &DOCKERFILE_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "css", .includes = &CSS_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "xml", .includes = &XML_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "zig", .includes = &ZIG_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = true },
+    .{ .name = "spellr", .includes = &EMPTY_INCLUDES, .hashbangs = &EMPTY_HASHBANGS, .locales = &EMPTY_LOCALES, .addable = false },
 };
 
 pub fn loadDefault() Config {

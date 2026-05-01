@@ -10,7 +10,7 @@ const FeatureStats = struct { mean: f64, variance: f64 };
 const ClassWeights = struct {
     @"+": FeatureStats,
     @"-": FeatureStats,
-    @"_": FeatureStats,
+    _: FeatureStats,
     @"/": FeatureStats,
     A: FeatureStats,
     z: FeatureStats,
@@ -55,14 +55,16 @@ const CLASS_NAMES = [NUM_CLASSES][]const u8{
 };
 
 // Returns true if class index is a "key" class
-fn isKeyClass(idx: usize) bool { return idx >= 4; }
+fn isKeyClass(idx: usize) bool {
+    return idx >= 4;
+}
 
 const WEIGHTS = [NUM_CLASSES]ClassWeights{
     // 0: not_key_lower36
     .{
         .@"+" = .{ .mean = 0.31397306397306396, .variance = 0.022188778922785653 },
         .@"-" = .{ .mean = 0.31397306397306396, .variance = 0.022188778922785653 },
-        .@"_" = .{ .mean = 0.31397306397306396, .variance = 0.022188778922785653 },
+        ._ = .{ .mean = 0.31397306397306396, .variance = 0.022188778922785653 },
         .@"/" = .{ .mean = 0.31397306397306396, .variance = 0.022188778922785653 },
         .A = .{ .mean = 0.31397306397306396, .variance = 0.022188778922785653 },
         .z = .{ .mean = 0.31397306397306396, .variance = 0.022188778922785653 },
@@ -102,7 +104,7 @@ const WEIGHTS = [NUM_CLASSES]ClassWeights{
     .{
         .@"+" = .{ .mean = 0.3888229606188467, .variance = 0.06458699929905236 },
         .@"-" = .{ .mean = 0.37484730018783585, .variance = 0.06441346177080855 },
-        .@"_" = .{ .mean = 0.34891859428821026, .variance = 0.061840198871359525 },
+        ._ = .{ .mean = 0.34891859428821026, .variance = 0.061840198871359525 },
         .@"/" = .{ .mean = 0.36237670731007626, .variance = 0.057997138047872224 },
         .A = .{ .mean = 0.37797187602172644, .variance = 0.06658320833305277 },
         .z = .{ .mean = 0.3890360503174757, .variance = 0.06410930763241254 },
@@ -142,7 +144,7 @@ const WEIGHTS = [NUM_CLASSES]ClassWeights{
     .{
         .@"+" = .{ .mean = 0.5208333333333334, .variance = 0.016493055555555556 },
         .@"-" = .{ .mean = 0.4602272727272727, .variance = 0.0036372245179063342 },
-        .@"_" = .{ .mean = 0.5208333333333334, .variance = 0.016493055555555556 },
+        ._ = .{ .mean = 0.5208333333333334, .variance = 0.016493055555555556 },
         .@"/" = .{ .mean = 0.5208333333333334, .variance = 0.016493055555555556 },
         .A = .{ .mean = 0.5208333333333334, .variance = 0.016493055555555556 },
         .z = .{ .mean = 0.5208333333333334, .variance = 0.016493055555555556 },
@@ -182,7 +184,7 @@ const WEIGHTS = [NUM_CLASSES]ClassWeights{
     .{
         .@"+" = .{ .mean = 0.2904040404040404, .variance = 0.009450566268748087 },
         .@"-" = .{ .mean = 0.2904040404040404, .variance = 0.009450566268748087 },
-        .@"_" = .{ .mean = 0.2904040404040404, .variance = 0.009450566268748087 },
+        ._ = .{ .mean = 0.2904040404040404, .variance = 0.009450566268748087 },
         .@"/" = .{ .mean = 0.2904040404040404, .variance = 0.009450566268748087 },
         .A = .{ .mean = 0.19174007810371443, .variance = 0.009236689398211761 },
         .z = .{ .mean = 0.2904040404040404, .variance = 0.009450566268748087 },
@@ -222,7 +224,7 @@ const WEIGHTS = [NUM_CLASSES]ClassWeights{
     .{
         .@"+" = .{ .mean = 0.7620479677679989, .variance = 0.22932788593099632 },
         .@"-" = .{ .mean = 0.7674698211603613, .variance = 0.23541768114473247 },
-        .@"_" = .{ .mean = 0.7683147592547762, .variance = 0.2348675719024521 },
+        ._ = .{ .mean = 0.7683147592547762, .variance = 0.2348675719024521 },
         .@"/" = .{ .mean = 0.7593109857187765, .variance = 0.2301098843967043 },
         .A = .{ .mean = 0.7159949406166164, .variance = 0.22348770070203433 },
         .z = .{ .mean = 0.7593094160660077, .variance = 0.2326241476630803 },
@@ -262,7 +264,7 @@ const WEIGHTS = [NUM_CLASSES]ClassWeights{
     .{
         .@"+" = .{ .mean = 1.914128895184136, .variance = 2.6500270032160596 },
         .@"-" = .{ .mean = 1.8968935536160076, .variance = 2.6402537652467646 },
-        .@"_" = .{ .mean = 1.914128895184136, .variance = 2.6500270032160596 },
+        ._ = .{ .mean = 1.914128895184136, .variance = 2.6500270032160596 },
         .@"/" = .{ .mean = 1.914128895184136, .variance = 2.6500270032160596 },
         .A = .{ .mean = 1.8633401715870046, .variance = 2.803124455039616 },
         .z = .{ .mean = 1.914128895184136, .variance = 2.6500270032160596 },
@@ -302,7 +304,7 @@ const WEIGHTS = [NUM_CLASSES]ClassWeights{
     .{
         .@"+" = .{ .mean = 0.3542240587695133, .variance = 0.08435722109651485 },
         .@"-" = .{ .mean = 0.3542240587695133, .variance = 0.08435722109651485 },
-        .@"_" = .{ .mean = 0.3542240587695133, .variance = 0.08435722109651485 },
+        ._ = .{ .mean = 0.3542240587695133, .variance = 0.08435722109651485 },
         .@"/" = .{ .mean = 0.3542240587695133, .variance = 0.08435722109651485 },
         .A = .{ .mean = 0.3542240587695133, .variance = 0.08435722109651485 },
         .z = .{ .mean = 0.34137681564107686, .variance = 0.08558842611995869 },
@@ -342,7 +344,7 @@ const WEIGHTS = [NUM_CLASSES]ClassWeights{
     .{
         .@"+" = .{ .mean = 0.17724196277495768, .variance = 0.01398464114694027 },
         .@"-" = .{ .mean = 0.17724196277495768, .variance = 0.01398464114694027 },
-        .@"_" = .{ .mean = 0.17724196277495768, .variance = 0.01398464114694027 },
+        ._ = .{ .mean = 0.17724196277495768, .variance = 0.01398464114694027 },
         .@"/" = .{ .mean = 0.17724196277495768, .variance = 0.01398464114694027 },
         .A = .{ .mean = 0.13370667489139618, .variance = 0.01751245983259839 },
         .z = .{ .mean = 0.17724196277495768, .variance = 0.01398464114694027 },
@@ -392,7 +394,7 @@ fn gaussianLogProb(x: f64, mean: f64, variance: f64) f64 {
 const Features = struct {
     @"+": f64,
     @"-": f64,
-    @"_": f64,
+    _: f64,
     @"/": f64,
     A: f64,
     z: f64,
@@ -474,8 +476,7 @@ fn extractFeatures(s: []const u8) Features {
         if (c == '=') cnt_equal += 1;
         switch (c) {
             'a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U' => vowels += 1,
-            'b'...'d', 'f'...'h', 'j'...'n', 'p'...'t', 'v'...'w', 'y', 'z',
-            'B'...'D', 'F'...'H', 'J'...'N', 'P'...'T', 'V'...'W', 'Y', 'Z' => consonants += 1,
+            'b'...'d', 'f'...'h', 'j'...'n', 'p'...'t', 'v'...'w', 'y', 'z', 'B'...'D', 'F'...'H', 'J'...'N', 'P'...'T', 'V'...'W', 'Y', 'Z' => consonants += 1,
             else => {},
         }
     }
@@ -515,7 +516,10 @@ fn extractFeatures(s: []const u8) Features {
     const all_lfds = [_]f64{ lfd_plus, lfd_minus, lfd_under, lfd_slash, lfd_A, lfd_z, lfd_Z, lfd_q, lfd_Q, lfd_X, lfd_x };
     var sum_lfd: f64 = 0;
     var max_lfd: f64 = 0;
-    for (all_lfds) |v| { sum_lfd += v; if (v > max_lfd) max_lfd = v; }
+    for (all_lfds) |v| {
+        sum_lfd += v;
+        if (v > max_lfd) max_lfd = v;
+    }
     const mean_lfd = sum_lfd / @as(f64, @floatFromInt(all_lfds.len));
 
     const vcr = if (consonants > 0) @as(f64, @floatFromInt(vowels)) / @as(f64, @floatFromInt(consonants)) else @as(f64, @floatFromInt(vowels));
@@ -523,7 +527,7 @@ fn extractFeatures(s: []const u8) Features {
     return .{
         .@"+" = lfd_plus,
         .@"-" = lfd_minus,
-        .@"_" = lfd_under,
+        ._ = lfd_under,
         .@"/" = lfd_slash,
         .A = lfd_A,
         .z = lfd_z,
@@ -576,38 +580,59 @@ fn chunkStats(s: []const u8, kind: ChunkKind) ChunkStats {
                 if (i < s.len and s[i] >= 'A' and s[i] <= 'Z') {
                     i += 1;
                     while (i < s.len and s[i] >= 'a' and s[i] <= 'z') i += 1;
-                    if (i > start + 1) lengths[n] = i - start else { i = start + 1; continue; }
-                } else { i += 1; continue; }
+                    if (i > start + 1) lengths[n] = i - start else {
+                        i = start + 1;
+                        continue;
+                    }
+                } else {
+                    i += 1;
+                    continue;
+                }
             },
             .lower_chunk => {
                 if (i < s.len and s[i] >= 'a' and s[i] <= 'z') {
                     while (i < s.len and s[i] >= 'a' and s[i] <= 'z') i += 1;
                     lengths[n] = i - start;
-                } else { i += 1; continue; }
+                } else {
+                    i += 1;
+                    continue;
+                }
             },
             .upper_chunk => {
                 if (i < s.len and s[i] >= 'A' and s[i] <= 'Z') {
                     while (i < s.len and s[i] >= 'A' and s[i] <= 'Z') i += 1;
                     lengths[n] = i - start;
-                } else { i += 1; continue; }
+                } else {
+                    i += 1;
+                    continue;
+                }
             },
             .alpha => {
                 if (i < s.len and std.ascii.isAlphabetic(s[i])) {
                     while (i < s.len and std.ascii.isAlphabetic(s[i])) i += 1;
                     lengths[n] = i - start;
-                } else { i += 1; continue; }
+                } else {
+                    i += 1;
+                    continue;
+                }
             },
             .alnum => {
                 if (i < s.len and std.ascii.isAlphanumeric(s[i])) {
                     while (i < s.len and std.ascii.isAlphanumeric(s[i])) i += 1;
                     lengths[n] = i - start;
-                } else { i += 1; continue; }
+                } else {
+                    i += 1;
+                    continue;
+                }
             },
             .digit => {
                 if (i < s.len and std.ascii.isDigit(s[i])) {
                     while (i < s.len and std.ascii.isDigit(s[i])) i += 1;
                     lengths[n] = i - start;
-                } else { i += 1; continue; }
+                } else {
+                    i += 1;
+                    continue;
+                }
             },
         }
         if (n < 255) n += 1;
@@ -630,10 +655,18 @@ fn chunkStats(s: []const u8, kind: ChunkKind) ChunkStats {
     return .{ .mean = mean, .variance = vsum / fn_, .max = mx, .count = fn_ };
 }
 
-fn isHexChar(c: u8) bool { return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F') or c == '-'; }
-fn isLower36Char(c: u8) bool { return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'z'); }
-fn isUpper36Char(c: u8) bool { return (c >= '0' and c <= '9') or (c >= 'A' and c <= 'Z'); }
-fn isBase64Char(c: u8) bool { return std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '+' or c == '/' or c == '='; }
+fn isHexChar(c: u8) bool {
+    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F') or c == '-';
+}
+fn isLower36Char(c: u8) bool {
+    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'z');
+}
+fn isUpper36Char(c: u8) bool {
+    return (c >= '0' and c <= '9') or (c >= 'A' and c <= 'Z');
+}
+fn isBase64Char(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '+' or c == '/' or c == '=';
+}
 
 fn classLogProb(features: Features, class_idx: usize, key_boost: f64) f64 {
     const w = &WEIGHTS[class_idx];
@@ -641,7 +674,7 @@ fn classLogProb(features: Features, class_idx: usize, key_boost: f64) f64 {
     // multiply in log space for all features
     log_prob += gaussianLogProb(features.@"+", w.@"+".mean, w.@"+".variance);
     log_prob += gaussianLogProb(features.@"-", w.@"-".mean, w.@"-".variance);
-    log_prob += gaussianLogProb(features.@"_", w.@"_".mean, w.@"_".variance);
+    log_prob += gaussianLogProb(features._, w._.mean, w._.variance);
     log_prob += gaussianLogProb(features.@"/", w.@"/".mean, w.@"/".variance);
     log_prob += gaussianLogProb(features.A, w.A.mean, w.A.variance);
     log_prob += gaussianLogProb(features.z, w.z.mean, w.z.variance);
@@ -688,9 +721,10 @@ pub fn isKey(s: []const u8, key_heuristic_weight: u32) bool {
     var best_prob: f64 = -std.math.inf(f64);
     for (0..NUM_CLASSES) |i| {
         const p = classLogProb(features, i, key_boost);
-        if (p > best_prob) { best_prob = p; best_idx = i; }
+        if (p > best_prob) {
+            best_prob = p;
+            best_idx = i;
+        }
     }
     return isKeyClass(best_idx);
 }
-
-

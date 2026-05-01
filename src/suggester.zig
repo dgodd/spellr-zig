@@ -31,7 +31,10 @@ pub fn suggestions(
             const sim = jaroWinkler(word, term);
             if (sim >= threshold) {
                 var dup = false;
-                for (candidates.items) |c| if (std.mem.eql(u8, c.word, word)) { dup = true; break; };
+                for (candidates.items) |c| if (std.mem.eql(u8, c.word, word)) {
+                    dup = true;
+                    break;
+                };
                 if (!dup) try candidates.append(allocator, .{ .word = word, .jw = sim });
             }
         }

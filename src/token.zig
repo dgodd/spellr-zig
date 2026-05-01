@@ -9,8 +9,12 @@ pub const CaseKind = enum {
     pub fn apply(self: CaseKind, allocator: std.mem.Allocator, word: []const u8) ![]u8 {
         const out = try allocator.dupe(u8, word);
         switch (self) {
-            .lower => { for (out) |*c| c.* = std.ascii.toLower(c.*); },
-            .upper => { for (out) |*c| c.* = std.ascii.toUpper(c.*); },
+            .lower => {
+                for (out) |*c| c.* = std.ascii.toLower(c.*);
+            },
+            .upper => {
+                for (out) |*c| c.* = std.ascii.toUpper(c.*);
+            },
             .title => {
                 if (out.len > 0) out[0] = std.ascii.toUpper(out[0]);
                 for (out[1..]) |*c| c.* = std.ascii.toLower(c.*);

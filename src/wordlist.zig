@@ -66,9 +66,17 @@ pub fn normalize(allocator: std.mem.Allocator, word: []const u8) ![]u8 {
         // normalize curly apostrophes (U+2018/2019 = E2 80 98/99) to plain apostrophe
         if (c == 0xE2 and i + 2 < word.len and word[i + 1] == 0x80 and
             (word[i + 2] == 0x98 or word[i + 2] == 0x99))
-        { out[j] = '\''; j += 1; i += 3; continue; }
+        {
+            out[j] = '\'';
+            j += 1;
+            i += 3;
+            continue;
+        }
         // strip trailing straight apostrophe (possessives)
-        if (c == '\'' and i + 1 == word.len) { i += 1; continue; }
+        if (c == '\'' and i + 1 == word.len) {
+            i += 1;
+            continue;
+        }
         out[j] = std.ascii.toLower(c);
         j += 1;
         i += 1;
@@ -78,25 +86,38 @@ pub fn normalize(allocator: std.mem.Allocator, word: []const u8) ![]u8 {
 
 // ── embedded wordlists ──────────────────────────────────────────────────────
 
-const ENGLISH_DATA      = @embedFile("../wordlists/english.txt");
-const ENGLISH_US_DATA   = @embedFile("../wordlists/english/US.txt");
-const ENGLISH_AU_DATA   = @embedFile("../wordlists/english/AU.txt");
-const ENGLISH_CA_DATA   = @embedFile("../wordlists/english/CA.txt");
-const ENGLISH_GB_DATA   = @embedFile("../wordlists/english/GB.txt");
-const ENGLISH_GBS_DATA  = @embedFile("../wordlists/english/GBs.txt");
-const ENGLISH_GBZ_DATA  = @embedFile("../wordlists/english/GBz.txt");
-const RUBY_DATA         = @embedFile("../wordlists/ruby.txt");
-const JAVASCRIPT_DATA   = @embedFile("../wordlists/javascript.txt");
-const HTML_DATA         = @embedFile("../wordlists/html.txt");
-const CSS_DATA          = @embedFile("../wordlists/css.txt");
-const SHELL_DATA        = @embedFile("../wordlists/shell.txt");
-const DOCKERFILE_DATA   = @embedFile("../wordlists/dockerfile.txt");
-const XML_DATA          = @embedFile("../wordlists/xml.txt");
-const SPELLR_DATA       = @embedFile("../wordlists/spellr.txt");
+const ENGLISH_DATA = @embedFile("../wordlists/english.txt");
+const ENGLISH_US_DATA = @embedFile("../wordlists/english/US.txt");
+const ENGLISH_AU_DATA = @embedFile("../wordlists/english/AU.txt");
+const ENGLISH_CA_DATA = @embedFile("../wordlists/english/CA.txt");
+const ENGLISH_GB_DATA = @embedFile("../wordlists/english/GB.txt");
+const ENGLISH_GBS_DATA = @embedFile("../wordlists/english/GBs.txt");
+const ENGLISH_GBZ_DATA = @embedFile("../wordlists/english/GBz.txt");
+const RUBY_DATA = @embedFile("../wordlists/ruby.txt");
+const JAVASCRIPT_DATA = @embedFile("../wordlists/javascript.txt");
+const HTML_DATA = @embedFile("../wordlists/html.txt");
+const CSS_DATA = @embedFile("../wordlists/css.txt");
+const SHELL_DATA = @embedFile("../wordlists/shell.txt");
+const DOCKERFILE_DATA = @embedFile("../wordlists/dockerfile.txt");
+const XML_DATA = @embedFile("../wordlists/xml.txt");
+const SPELLR_DATA = @embedFile("../wordlists/spellr.txt");
 
 pub const WordlistId = enum {
-    english, english_us, english_au, english_ca, english_gb, english_gbs, english_gbz,
-    ruby, javascript, html, css, shell, dockerfile, xml, spellr,
+    english,
+    english_us,
+    english_au,
+    english_ca,
+    english_gb,
+    english_gbs,
+    english_gbz,
+    ruby,
+    javascript,
+    html,
+    css,
+    shell,
+    dockerfile,
+    xml,
+    spellr,
 };
 
 pub const EmbeddedWordlists = struct {
@@ -108,22 +129,22 @@ pub const EmbeddedWordlists = struct {
 
 pub fn loadAll(allocator: std.mem.Allocator) !EmbeddedWordlists {
     return .{ .lists = .{
-        try Wordlist.init(allocator, "english",      ENGLISH_DATA),
-        try Wordlist.init(allocator, "english_us",   ENGLISH_US_DATA),
-        try Wordlist.init(allocator, "english_au",   ENGLISH_AU_DATA),
-        try Wordlist.init(allocator, "english_ca",   ENGLISH_CA_DATA),
-        try Wordlist.init(allocator, "english_gb",   ENGLISH_GB_DATA),
-        try Wordlist.init(allocator, "english_gbs",  ENGLISH_GBS_DATA),
-        try Wordlist.init(allocator, "english_gbz",  ENGLISH_GBZ_DATA),
-        try Wordlist.init(allocator, "ruby",         RUBY_DATA),
-        try Wordlist.init(allocator, "javascript",   JAVASCRIPT_DATA),
-        try Wordlist.init(allocator, "html",         HTML_DATA),
-        try Wordlist.init(allocator, "css",          CSS_DATA),
-        try Wordlist.init(allocator, "shell",        SHELL_DATA),
-        try Wordlist.init(allocator, "dockerfile",   DOCKERFILE_DATA),
-        try Wordlist.init(allocator, "xml",          XML_DATA),
-        try Wordlist.init(allocator, "spellr",       SPELLR_DATA),
-    }};
+        try Wordlist.init(allocator, "english", ENGLISH_DATA),
+        try Wordlist.init(allocator, "english_us", ENGLISH_US_DATA),
+        try Wordlist.init(allocator, "english_au", ENGLISH_AU_DATA),
+        try Wordlist.init(allocator, "english_ca", ENGLISH_CA_DATA),
+        try Wordlist.init(allocator, "english_gb", ENGLISH_GB_DATA),
+        try Wordlist.init(allocator, "english_gbs", ENGLISH_GBS_DATA),
+        try Wordlist.init(allocator, "english_gbz", ENGLISH_GBZ_DATA),
+        try Wordlist.init(allocator, "ruby", RUBY_DATA),
+        try Wordlist.init(allocator, "javascript", JAVASCRIPT_DATA),
+        try Wordlist.init(allocator, "html", HTML_DATA),
+        try Wordlist.init(allocator, "css", CSS_DATA),
+        try Wordlist.init(allocator, "shell", SHELL_DATA),
+        try Wordlist.init(allocator, "dockerfile", DOCKERFILE_DATA),
+        try Wordlist.init(allocator, "xml", XML_DATA),
+        try Wordlist.init(allocator, "spellr", SPELLR_DATA),
+    } };
 }
 
 test "binary search finds word" {

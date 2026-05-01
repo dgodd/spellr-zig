@@ -17,8 +17,14 @@ pub fn main(init: std.process.Init) !void {
 
     const opts = try cli.parse(arena, args[1..]);
 
-    if (opts.show_help) { cli.printHelp(); return; }
-    if (opts.show_version) { cli.printVersion(); return; }
+    if (opts.show_help) {
+        cli.printHelp();
+        return;
+    }
+    if (opts.show_version) {
+        cli.printVersion();
+        return;
+    }
 
     // load config (all config allocations live in config_arena)
     var config_arena = std.heap.ArenaAllocator.init(gpa);
@@ -129,11 +135,16 @@ fn appendToProjectWordlist(allocator: std.mem.Allocator, io: Io, lang_name: []co
     } else |_| {}
 
     var already = false;
-    for (words.items) |w| if (std.mem.eql(u8, w, normalized)) { already = true; break; };
+    for (words.items) |w| if (std.mem.eql(u8, w, normalized)) {
+        already = true;
+        break;
+    };
     if (!already) {
         try words.append(allocator, try allocator.dupe(u8, normalized));
         std.sort.pdq([]const u8, words.items, {}, struct {
-            fn lt(_: void, a: []const u8, b: []const u8) bool { return std.mem.lessThan(u8, a, b); }
+            fn lt(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.lessThan(u8, a, b);
+            }
         }.lt);
     }
 
