@@ -330,3 +330,120 @@ fn globMatchInner(pattern: []const u8, str: []const u8) bool {
     while (pi < pattern.len and pattern[pi] == '*') pi += 1;
     return pi == pattern.len;
 }
+
+// ── regression tests ──────────────────────────────────────────────────────────
+
+test "globMatchPathAware: star does not cross slash" {
+    // Regression: /public/*.html was wrongly matching public/maintenance/default.html
+    try std.testing.expect(!globMatchPathAware("public/*.html", "public/maintenance/default.html"));
+}
+
+test "globMatchPathAware: star matches within a single path component" {
+    try std.testing.expect(globMatchPathAware("public/*.html", "public/index.html"));
+}
+
+test "globMatchPathAware: double-star crosses directory boundaries" {
+    // Regression: ** patterns must still work after the path-aware fix
+    try std.testing.expect(globMatchPathAware("webpack/app/_scenes/**/*.generated.ts", "webpack/app/_scenes/admin/deep/foo.generated.ts"));
+}
+
+test "globMatchPathAware: plain pattern (no slash) matches normally" {
+    try std.testing.expect(globMatchPathAware("*.rb", "foo.rb"));
+    try std.testing.expect(!globMatchPathAware("*.rb", "foo.js"));
+}
+
+test "matchGitignoreFile: rooted pattern with interior slash uses path-aware matching" {
+    // /public/*.html should NOT match public/sub/file.html (star can't cross slash)
+    try std.testing.expect(!matchGitignoreFile("/public/*.html", "public/sub/file.html", "file.html"));
+    // but should match direct child
+    try std.testing.expect(matchGitignoreFile("/public/*.html", "public/index.html", "index.html"));
+}
+
+test "matchGitignoreFile: non-rooted pattern without slash matches basename only" {
+    // Regression: *.rb should match by basename, not full path
+    try std.testing.expect(matchGitignoreFile("*.rb", "app/models/user.rb", "user.rb"));
+    // should not match a different extension
+    try std.testing.expect(!matchGitignoreFile("*.rb", "app/models/user.js", "user.js"));
+}
+
+test "matchGitignoreFile: non-rooted pattern with interior slash uses path-aware matching" {
+    try std.testing.expect(matchGitignoreFile("vendor/bundle", "vendor/bundle", "bundle"));
+    try std.testing.expect(!matchGitignoreFile("vendor/bundle", "other/vendor/bundle", "bundle"));
+}
+
+test "matchNestedGitignore: patterns only apply within the prefix scope" {
+    const scope = NestedGitignore{
+        .prefix = ".jj/",
+        .patterns = &[_][]const u8{"*"},
+    };
+    // inside scope: excluded
+    try std.testing.expect(matchNestedGitignore(scope, ".jj/anything"));
+    // outside scope: not excluded
+    try std.testing.expect(!matchNestedGitignore(scope, "other/anything"));
+}
+
+test "matchNestedGitignore: double-star pattern excludes nested files" {
+    const scope = NestedGitignore{
+        .prefix = ".ruby-lsp/",
+        .patterns = &[_][]const u8{"**/*.rb"},
+    };
+    try std.testing.expect(matchNestedGitignore(scope, ".ruby-lsp/deep/nested/foo.rb"));
+    try std.testing.expect(!matchNestedGitignore(scope, ".ruby-lsp/deep/nested/foo.ts"));
+}
+
+test "matchNestedGitignore: does not match files outside the prefix" {
+    const scope = NestedGitignore{
+        .prefix = "vendor/",
+        .patterns = &[_][]const u8{"*.lock"},
+    };
+    try std.testing.expect(matchNestedGitignore(scope, "vendor/Gemfile.lock"));
+    try std.testing.expect(!matchNestedGitignore(scope, "Gemfile.lock"));
+    try std.testing.expect(!matchNestedGitignore(scope, "other/Gemfile.lock"));
+}
+
+test "FileList.matchesHashbang: missing file returns false without crash" {
+    // Regression: matchesHashbang must not crash on missing files (symlinks to missing targets, etc.)
+    const allocator = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const config = @import("config.zig").loadDefault();
+    var fl = FileList.init(allocator, io, &config, true);
+
+    const ruby_hashbangs = [_][]const u8{"ruby"};
+    try std.testing.expect(!fl.matchesHashbang("/tmp/nonexistent_spellr_test_xyz", &ruby_hashbangs));
+}
+
+test "FileList.fileInfo: files with no language match still get english wordlist" {
+    // Regression: files that don't match any language were previously returned as null.
+    // Now all non-excluded files get at least the english + spellr wordlists.
+    const allocator = std.testing.allocator;
+
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const config = @import("config.zig").loadDefault();
+    var fl = FileList.init(allocator, io, &config, true);
+
+    // A file with an extension that matches no language
+    const result = try fl.fileInfo("some_random_file.xyz");
+    try std.testing.expect(result != null);
+
+    const info = result.?;
+    defer {
+        allocator.free(info.path);
+        allocator.free(info.wordlist_ids);
+    }
+
+    // Must contain english and spellr at minimum
+    var has_english = false;
+    var has_spellr = false;
+    for (info.wordlist_ids) |wid| {
+        if (wid == .english) has_english = true;
+        if (wid == .spellr) has_spellr = true;
+    }
+    try std.testing.expect(has_english);
+    try std.testing.expect(has_spellr);
+}
