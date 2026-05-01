@@ -42,7 +42,8 @@ Zig 0.16 replaced `std.io`/`std.fs` with `std.Io` (capital I). Key patterns:
 - **stdout/stderr**: `var w: Io.File.Writer = .init(.stdout(), io, &buf);` then `w.interface.print(...)` + `w.flush()`
 - **file read**: `Io.File.Reader.init(file, io, &rbuf)` + `reader.interface.appendRemaining(allocator, &list, .unlimited)`
 - **file open**: `Io.Dir.cwd().openFile(io, path, .{})`
-- **dir walk**: `dir.walk(allocator)` then `walker.next(io)` — must open a real dir fd, not use the AT.FDCWD sentinel
+- **dir walk**: `dir.walkSelectively(allocator)` then `walker.next(io)` — must open a real dir fd, not use the AT.FDCWD sentinel; call `walker.enter(io, entry)` to descend into a directory
+- **Io.Threaded (tests)**: `var t = std.Io.Threaded.init(allocator, .{})` (no error), `defer t.deinit()`, `t.io()` — use to construct an `Io` value in unit tests
 - **create dir**: `Io.Dir.cwd().createDirPath(io, path)`
 - **stdin (interactive)**: `Io.File.Reader.init(Io.File.stdin(), io, &buf)` + fixed 1-byte writer + `.unlimited`
 - **ArrayList**: `std.ArrayList(T).empty` — allocator is passed per method call (`.append(allocator, x)`, `.deinit(allocator)`, `.toOwnedSlice(allocator)`)
@@ -110,6 +111,21 @@ Project-specific wordlists are read from `.spellr_wordlists/*.txt` at runtime.
 | `-i` | `interactive` | Raw-terminal prompt per miss; numbered suggestions, `a`dd, `r`eplace, `S`kip all, `^C` quit |
 | `-a` | `autocorrect` | Auto-apply top suggestion; report if no suggestion |
 
+## File discovery (`file_list.zig`)
+
+`FileList.collect` walks the directory tree using `walkSelectively`. Key behaviours:
+
+- **Symlinks** are treated as files (`.file, .sym_link =>` branch in the walker switch).
+- **Root `.gitignore`** is loaded once before the walk into `gitignore_patterns`.
+- **Nested `.gitignore`** files are loaded via `loadNestedGitignore` each time a directory is entered, stored as `NestedGitignore` entries with a `prefix` (e.g. `".jj/"`) so patterns are scoped to that subtree. Both `isExcluded` and `isDirExcluded` iterate `nested_gitignores` and call `matchNestedGitignore`.
+- **Glob semantics** (gitignore-compatible):
+  - Patterns without `/` match basename only.
+  - Patterns with an interior `/` use `globMatchPathAware` where `*` does not cross `/`.
+  - If the pattern contains `**`, `globMatchPathAware` delegates to `globMatchInner` (unrestricted crossing).
+  - Patterns with a trailing `/` match directory names.
+- **No language guard**: `fileInfo` always returns a result for any non-excluded path, with at minimum `english` + `spellr` wordlists. Files matching language patterns get additional wordlist IDs appended.
+- **Hashbang detection**: uses `appendRemaining` (not a single `stream` call) because `Io.File.Reader` in positional mode calls `sendFile` on the first `stream`, which returns 0 bytes when the writer returns `error.Unimplemented`, then switches to simple mode. `appendRemaining` loops internally and handles this transparently.
+
 ## Configuration (.spellr.yml)
 
 Parsed by `config.zig`. Recognised keys:
@@ -117,5 +133,5 @@ Parsed by `config.zig`. Recognised keys:
 - `key_heuristic_weight` (default 5)
 - `key_minimum_length` (default 6)
 - `locale: US|AU|CA|GB|GBs|GBz` (default US)
-
-Language and exclude customisation from YAML is not yet implemented; defaults from `config.zig` are used.
+- `excludes:` list — appended to the built-in exclude patterns
+- `languages:` map — can add `includes:` globs and `locale:` to existing languages, or define new custom language entries

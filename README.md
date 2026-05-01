@@ -79,7 +79,16 @@ Project-specific words go in `.spellr_wordlists/<language>.txt` and are loaded a
 
 ### File discovery (`file_list.zig`)
 
-Directory walking uses `Io.Dir.walk`. Language detection matches files by glob pattern (e.g. `*.rb` → ruby wordlist) and by hashbang (`#!/usr/bin/env ruby`). Glob matching supports `*` and `?` wildcards, and directory patterns ending in `/`.
+Directory walking uses `Io.Dir.walkSelectively`, which allows skipping entire subtrees early. Language detection matches files by glob pattern (e.g. `*.rb` → ruby wordlist) and by hashbang (`#!/usr/bin/env ruby`). Glob matching follows gitignore semantics:
+
+- Patterns without a `/` are matched against the filename (basename) only.
+- Patterns with an interior `/` are anchored path patterns: `*` does not cross directory separators.
+- `**` always crosses directory boundaries.
+- Patterns with a trailing `/` match directories only.
+
+Root `.gitignore` and per-directory nested `.gitignore` files are both loaded and applied, scoped to their respective directories.
+
+Symlinks are treated as regular files during the walk. Files with no matching language still get the `english` and `spellr` wordlists.
 
 ### Suggestion engine (`suggester.zig`)
 
@@ -97,7 +106,6 @@ All five output modes from the Ruby gem are implemented. Interactive mode uses `
 
 ## Notable differences from the Ruby gem
 
-- **No `.gitignore` integration.** The Ruby gem reads `.gitignore` to exclude files; this implementation only uses the patterns in `.spellr.yml`.
 - **No YAML language configuration.** Language `includes`, `excludes`, and `hashbangs` come from compiled-in defaults; only `word_minimum_length`, `key_heuristic_weight`, `key_minimum_length`, and `locale` are read from `.spellr.yml`.
 - **No parallel processing.** The `--no-parallel` flag is accepted but has no effect; files are always checked sequentially.
 - **Single binary.** All wordlists (~786 KB of text) are embedded in the binary at compile time. The release build is ~3.7 MB.
