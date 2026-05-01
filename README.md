@@ -110,3 +110,12 @@ All five output modes from the Ruby gem are implemented. Interactive mode uses `
 - **No parallel processing.** The `--no-parallel` flag is accepted but has no effect; files are always checked sequentially.
 - **Single binary.** All wordlists (~786 KB of text) are embedded in the binary at compile time. The release build is ~3.7 MB.
 
+## To Create a release
+
+To cut a release, just push a version tag:
+
+```
+set repo_version (zig build run -- --version 2>&1 | cut -d ' ' -f 2)
+git tag v$repo_version
+git push origin v$repo_version
+```

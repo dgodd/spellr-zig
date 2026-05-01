@@ -1,5 +1,7 @@
+const config = @import("config");
 const std = @import("std");
 const Io = std.Io;
+
 const reporter_mod = @import("reporter.zig");
 
 pub const Options = struct {
@@ -13,8 +15,6 @@ pub const Options = struct {
     show_help: bool = false,
     show_version: bool = false,
 };
-
-const VERSION = "0.1.0-zig";
 
 const HELP =
     \\Usage: spellr [options] [files...]
@@ -82,5 +82,5 @@ pub fn printHelp() void {
 }
 
 pub fn printVersion() void {
-    std.debug.print("spellr {s}\n", .{VERSION});
+    std.debug.print("spellr {s}\n", .{config.version});
 }

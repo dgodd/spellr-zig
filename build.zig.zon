@@ -1,7 +1,7 @@
 .{
     .fingerprint = 0xffd03fcde15c7767,
     .name = .spellr,
-    .version = "0.1.0",
+    .version = "0.12.1",
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
     .paths = .{"."},

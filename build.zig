@@ -4,6 +4,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const pkg_info = @import("build.zig.zon");
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", pkg_info.version);
+
     const exe = b.addExecutable(.{
         .name = "spellr",
         .root_module = b.createModule(.{
@@ -12,6 +16,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    // Add the options as a module named "config"
+    exe.root_module.addOptions("config", options);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
