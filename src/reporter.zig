@@ -171,6 +171,53 @@ pub const Reporter = struct {
                 if (idx < suggs.len) return .{ .replace = try self.allocator.dupe(u8, suggs[idx]) };
                 return .skip;
             },
+            'a' => {
+                try w.interface.print("\n  Add to which wordlist?\n", .{});
+                var visible: [16]*const Wordlist = undefined;
+                var visible_len: usize = 0;
+                for (wordlists) |wl| {
+                    if (std.mem.startsWith(u8, wl.name, "english_")) continue;
+                    visible[visible_len] = wl;
+                    visible_len += 1;
+                    try w.interface.print("  [{d}] {s}\n", .{ visible_len, wl.name });
+                }
+                try w.interface.print("> ", .{});
+                try w.flush();
+                var kbuf: [1]u8 = undefined;
+                const kn = std.posix.read(stdin_file.handle, &kbuf) catch return .skip;
+                if (kn == 0) return .skip;
+                const k = kbuf[0];
+                if (k >= '1' and k <= '9') {
+                    const idx = k - '1';
+                    if (idx < visible_len) return .{ .add_to_wordlist = visible[idx].name };
+                }
+                return .skip;
+            },
+            'r', 'R' => {
+                std.posix.tcsetattr(stdin_file.handle, .NOW, orig) catch {};
+                try w.interface.print("\n  Replace \"{s}\" with: ", .{miss.text});
+                try w.flush();
+                var repl_buf: [512]u8 = undefined;
+                var repl_len: usize = 0;
+                var ch: [1]u8 = undefined;
+                while (repl_len < repl_buf.len) {
+                    const rn = std.posix.read(stdin_file.handle, &ch) catch break;
+                    if (rn == 0 or ch[0] == '\n' or ch[0] == '\r') break;
+                    repl_buf[repl_len] = ch[0];
+                    repl_len += 1;
+                }
+                const replacement = std.mem.trim(u8, repl_buf[0..repl_len], " \t");
+                if (replacement.len == 0) return .skip;
+                const duped = try self.allocator.dupe(u8, replacement);
+                if (key == 'R') {
+                    try self.replace_all.put(
+                        try self.allocator.dupe(u8, norm),
+                        try self.allocator.dupe(u8, duped),
+                    );
+                }
+                return .{ .replace = duped };
+            },
+            's' => return .skip,
             'S' => {
                 try self.skip_all.put(try self.allocator.dupe(u8, norm), {});
                 return .skip;
