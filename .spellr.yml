@@ -1,0 +1,10 @@
+---
+excludes:
+  - wordlists/*
+languages:
+  lorem:
+    includes:
+      - .spellr.yml
+  zig:
+    includes:
+      - '*.zig'
