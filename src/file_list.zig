@@ -1,0 +1,155 @@
+const std = @import("std");
+const Io = std.Io;
+const Config = @import("config.zig").Config;
+const LanguageConfig = @import("config.zig").LanguageConfig;
+const WordlistId = @import("wordlist.zig").WordlistId;
+const Locale = @import("config.zig").Locale;
+
+pub const FileInfo = struct {
+    path: []const u8,
+    wordlist_ids: []WordlistId,
+};
+
+pub const FileList = struct {
+    allocator: std.mem.Allocator,
+    io: Io,
+    config: *const Config,
+    suppress_file_rules: bool,
+
+    pub fn init(allocator: std.mem.Allocator, io: Io, config: *const Config, suppress_file_rules: bool) FileList {
+        return .{ .allocator = allocator, .io = io, .config = config, .suppress_file_rules = suppress_file_rules };
+    }
+
+    pub fn collect(self: *FileList, explicit_paths: []const []const u8) ![]FileInfo {
+        var results = std.ArrayList(FileInfo).empty;
+        if (explicit_paths.len > 0) {
+            for (explicit_paths) |p| {
+                if (try self.fileInfo(p)) |info| try results.append(self.allocator, info);
+            }
+        } else {
+            var actual_dir = Io.Dir.cwd().openDir(self.io, ".", .{ .iterate = true }) catch return results.toOwnedSlice(self.allocator);
+            defer actual_dir.close(self.io);
+            var walker = try actual_dir.walk(self.allocator);
+            defer walker.deinit();
+            while (try walker.next(self.io)) |entry| {
+                if (entry.kind != .file) continue;
+                if (!self.suppress_file_rules and self.isExcluded(entry.path)) continue;
+                if (try self.fileInfo(entry.path)) |info| try results.append(self.allocator, info);
+            }
+        }
+        return results.toOwnedSlice(self.allocator);
+    }
+
+    fn isExcluded(self: *FileList, rel_path: []const u8) bool {
+        const base = std.fs.path.basename(rel_path);
+        for (self.config.excludes) |pattern| {
+            if (globMatch(pattern, rel_path) or globMatch(pattern, base)) return true;
+        }
+        return false;
+    }
+
+    fn fileInfo(self: *FileList, path: []const u8) !?FileInfo {
+        var ids = std.ArrayList(WordlistId).empty;
+
+        // always add english + locale wordlists
+        const english_locale: Locale = blk: {
+            for (self.config.languages) |lang| {
+                if (std.mem.eql(u8, lang.name, "english")) break :blk lang.locale orelse .US;
+            }
+            break :blk .US;
+        };
+        try ids.append(self.allocator, .english);
+        const locale_id: WordlistId = switch (english_locale) {
+            .US => .english_us, .AU => .english_au, .CA => .english_ca,
+            .GB => .english_gb, .GBs => .english_gbs, .GBz => .english_gbz,
+        };
+        try ids.append(self.allocator, locale_id);
+
+        // match language-specific wordlists
+        const base = std.fs.path.basename(path);
+        for (self.config.languages) |lang| {
+            if (std.mem.eql(u8, lang.name, "english") or std.mem.eql(u8, lang.name, "spellr")) continue;
+            var matched = false;
+            for (lang.includes) |pattern| {
+                if (globMatch(pattern, base) or globMatch(pattern, path)) { matched = true; break; }
+            }
+            if (!matched and lang.hashbangs.len > 0) {
+                matched = self.matchesHashbang(path, lang.hashbangs);
+            }
+            if (matched) {
+                if (wordlistIdForLang(lang.name)) |wid| {
+                    if (!containsId(ids.items, wid)) try ids.append(self.allocator, wid);
+                }
+            }
+        }
+
+        try ids.append(self.allocator, .spellr);
+        if (ids.items.len <= 3) { // only english + locale + spellr = no language matched
+            // still check the file — english applies to everything
+        }
+
+        return FileInfo{
+            .path = try self.allocator.dupe(u8, path),
+            .wordlist_ids = try ids.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn matchesHashbang(self: *FileList, path: []const u8, hashbangs: []const []const u8) bool {
+        const file = Io.Dir.cwd().openFile(self.io, path, .{}) catch return false;
+        defer file.close(self.io);
+        var rbuf: [128]u8 = undefined;
+        var reader = Io.File.Reader.init(file, self.io, &rbuf);
+        var buf: [128]u8 = undefined;
+        var iw = Io.Writer.fixed(&buf);
+        const n = reader.interface.stream(&iw, .unlimited) catch 0;
+        const first = buf[0..@min(n, buf.len)];
+        if (!std.mem.startsWith(u8, first, "#!")) return false;
+        const line_end = std.mem.indexOfScalar(u8, first, '\n') orelse n;
+        const shebang = first[2..line_end];
+        for (hashbangs) |hb| if (std.mem.indexOf(u8, shebang, hb) != null) return true;
+        return false;
+    }
+};
+
+fn wordlistIdForLang(name: []const u8) ?WordlistId {
+    if (std.mem.eql(u8, name, "ruby")) return .ruby;
+    if (std.mem.eql(u8, name, "javascript")) return .javascript;
+    if (std.mem.eql(u8, name, "html")) return .html;
+    if (std.mem.eql(u8, name, "css")) return .css;
+    if (std.mem.eql(u8, name, "shell")) return .shell;
+    if (std.mem.eql(u8, name, "dockerfile")) return .dockerfile;
+    if (std.mem.eql(u8, name, "xml")) return .xml;
+    if (std.mem.eql(u8, name, "spellr")) return .spellr;
+    return null;
+}
+
+fn containsId(ids: []WordlistId, id: WordlistId) bool {
+    for (ids) |e| if (e == id) return true;
+    return false;
+}
+
+pub fn globMatch(pattern: []const u8, path: []const u8) bool {
+    if (std.mem.endsWith(u8, pattern, "/")) {
+        return std.mem.startsWith(u8, path, pattern) or std.mem.indexOf(u8, path, pattern) != null;
+    }
+    return globMatchInner(pattern, path);
+}
+
+fn globMatchInner(pattern: []const u8, str: []const u8) bool {
+    var pi: usize = 0;
+    var si: usize = 0;
+    var star_pi: usize = 0;
+    var star_si: usize = 0;
+    var has_star = false;
+    while (si < str.len) {
+        if (pi < pattern.len and (pattern[pi] == str[si] or pattern[pi] == '?')) {
+            pi += 1; si += 1;
+        } else if (pi < pattern.len and pattern[pi] == '*') {
+            has_star = true; star_pi = pi + 1; star_si = si; pi += 1;
+        } else if (has_star) {
+            pi = star_pi; star_si += 1; si = star_si;
+        } else return false;
+    }
+    while (pi < pattern.len and pattern[pi] == '*') pi += 1;
+    return pi == pattern.len;
+}

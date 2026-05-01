@@ -1,0 +1,121 @@
+const std = @import("std");
+const Io = std.Io;
+
+pub const Locale = enum { US, AU, CA, GB, GBs, GBz };
+
+pub const LanguageConfig = struct {
+    name: []const u8,
+    includes: []const []const u8,
+    hashbangs: []const []const u8,
+    locale: ?Locale,
+    addable: bool,
+};
+
+pub const Config = struct {
+    word_minimum_length: usize = 3,
+    key_heuristic_weight: u32 = 5,
+    key_minimum_length: usize = 6,
+    excludes: []const []const u8,
+    languages: []LanguageConfig,
+};
+
+const DEFAULT_EXCLUDES = [_][]const u8{
+    ".git/", ".spellr_wordlists/", ".DS_Store", "Gemfile.lock",
+    ".rspec_status", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.ico",
+    ".gitkeep", ".keep", "*.svg", "*.eot", "*.ttf", "*.woff", "*.woff2",
+    "*.zip", "*.pdf", "*.xlsx", "*.gz",
+};
+
+const RUBY_INCLUDES = [_][]const u8{
+    "*.rb", "*.rake", "*.gemspec", "*.erb", "*.haml", "*.jbuilder",
+    "*.builder", "Gemfile", "Rakefile", "config.ru", "Capfile", ".simplecov",
+};
+const RUBY_HASHBANGS = [_][]const u8{"ruby"};
+const HTML_INCLUDES = [_][]const u8{
+    "*.html", "*.hml", "*.jsx", "*.tsx", "*.js", "*.ts",
+    "*.jsx.snap", "*.tsx.snap", "*.coffee", "*.haml", "*.erb",
+    "*.rb", "*.builder", "*.css", "*.scss", "*.sass", "*.less",
+};
+const JS_INCLUDES = [_][]const u8{
+    "*.html", "*.hml", "*.jsx", "*.tsx", "*.js", "*.ts",
+    "*.jsx.snap", "*.tsx.snap", "*.coffee", "*.haml", "*.erb", "*.json",
+};
+const SHELL_INCLUDES = [_][]const u8{ "*.sh", "Dockerfile" };
+const SHELL_HASHBANGS = [_][]const u8{ "bash", "sh" };
+const DOCKERFILE_INCLUDES = [_][]const u8{"Dockerfile"};
+const CSS_INCLUDES = [_][]const u8{ "*.css", "*.sass", "*.scss", "*.less" };
+const XML_INCLUDES = [_][]const u8{ "*.xml", "*.html", "*.haml", "*.hml", "*.svg" };
+const EMPTY_INCLUDES = [_][]const u8{};
+const EMPTY_HASHBANGS = [_][]const u8{};
+
+var DEFAULT_LANGUAGES = [_]LanguageConfig{
+    .{ .name = "english",    .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locale = .US,  .addable = true },
+    .{ .name = "ruby",       .includes = &RUBY_INCLUDES,        .hashbangs = &RUBY_HASHBANGS,   .locale = null, .addable = true },
+    .{ .name = "html",       .includes = &HTML_INCLUDES,        .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
+    .{ .name = "javascript", .includes = &JS_INCLUDES,          .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
+    .{ .name = "shell",      .includes = &SHELL_INCLUDES,       .hashbangs = &SHELL_HASHBANGS,  .locale = null, .addable = true },
+    .{ .name = "dockerfile", .includes = &DOCKERFILE_INCLUDES,  .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
+    .{ .name = "css",        .includes = &CSS_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
+    .{ .name = "xml",        .includes = &XML_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
+    .{ .name = "spellr",     .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = false },
+};
+
+pub fn loadDefault() Config {
+    return .{
+        .excludes = &DEFAULT_EXCLUDES,
+        .languages = &DEFAULT_LANGUAGES,
+    };
+}
+
+pub fn loadFromFile(allocator: std.mem.Allocator, io: Io, path: []const u8) !Config {
+    var config = loadDefault();
+    const cwd = Io.Dir.cwd();
+    const file = cwd.openFile(io, path, .{}) catch return config;
+    var rbuf: [8192]u8 = undefined;
+    var reader = Io.File.Reader.init(file, io, &rbuf);
+    var content = std.ArrayList(u8).empty;
+    defer content.deinit(allocator);
+    try reader.interface.appendRemaining(allocator, &content, .unlimited);
+    file.close(io);
+    parseYamlOverrides(&config, content.items);
+    return config;
+}
+
+fn parseYamlOverrides(config: *Config, yaml: []const u8) void {
+    var lines = std.mem.splitScalar(u8, yaml, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trimEnd(u8, raw, "\r ");
+        if (line.len == 0 or line[0] == '#') continue;
+        if (parseKV(line, "word_minimum_length")) |v|
+            config.word_minimum_length = std.fmt.parseInt(usize, v, 10) catch continue;
+        if (parseKV(line, "key_heuristic_weight")) |v|
+            config.key_heuristic_weight = std.fmt.parseInt(u32, v, 10) catch continue;
+        if (parseKV(line, "key_minimum_length")) |v|
+            config.key_minimum_length = std.fmt.parseInt(usize, v, 10) catch continue;
+        if (std.mem.indexOf(u8, line, "locale:") != null) {
+            if (parseKV(std.mem.trimStart(u8, line, " \t"), "locale")) |v| {
+                const loc = parseLocale(v);
+                for (config.languages) |*lang| {
+                    if (std.mem.eql(u8, lang.name, "english")) { lang.locale = loc; break; }
+                }
+            }
+        }
+    }
+}
+
+fn parseKV(line: []const u8, key: []const u8) ?[]const u8 {
+    const t = std.mem.trimStart(u8, line, " \t");
+    if (!std.mem.startsWith(u8, t, key)) return null;
+    const rest = t[key.len..];
+    if (rest.len < 2 or rest[0] != ':') return null;
+    return std.mem.trim(u8, rest[1..], " \t'\"");
+}
+
+fn parseLocale(s: []const u8) Locale {
+    if (std.mem.eql(u8, s, "AU")) return .AU;
+    if (std.mem.eql(u8, s, "CA")) return .CA;
+    if (std.mem.eql(u8, s, "GB")) return .GB;
+    if (std.mem.eql(u8, s, "GBs")) return .GBs;
+    if (std.mem.eql(u8, s, "GBz")) return .GBz;
+    return .US;
+}
