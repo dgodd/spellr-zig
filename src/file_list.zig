@@ -156,10 +156,13 @@ pub const FileList = struct {
             }
         }
 
-        try ids.append(self.allocator, .spellr);
-        if (ids.items.len <= 3) { // only english + locale + spellr = no language matched
-            // still check the file — english applies to everything
+        // No language matched — skip the file (English only applies alongside a matched language)
+        if (ids.items.len == 2) {
+            ids.deinit(self.allocator);
+            return null;
         }
+
+        try ids.append(self.allocator, .spellr);
 
         return FileInfo{
             .path = try self.allocator.dupe(u8, path),
