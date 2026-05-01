@@ -1,2 +1,12 @@
 [tools]
 zig = "latest"
+
+[tasks.build]
+description = "Build the CLI"
+run = "zig build -Doptimize=ReleaseFast"
+
+[tasks.test-verbose]
+run = "zig test root.zig 2>&1|cat"
+
+[tasks.test]
+run = "zig test root.zig"

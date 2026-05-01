@@ -10,12 +10,18 @@ pub const FileInfo = struct {
     wordlist_ids: []WordlistId,
 };
 
+const NestedGitignore = struct {
+    prefix: []const u8,
+    patterns: []const []const u8,
+};
+
 pub const FileList = struct {
     allocator: std.mem.Allocator,
     io: Io,
     config: *const Config,
     suppress_file_rules: bool,
     gitignore_patterns: []const []const u8 = &.{},
+    nested_gitignores: std.ArrayList(NestedGitignore) = std.ArrayList(NestedGitignore).empty,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: *const Config, suppress_file_rules: bool) FileList {
         return .{ .allocator = allocator, .io = io, .config = config, .suppress_file_rules = suppress_file_rules };
@@ -35,6 +41,13 @@ pub const FileList = struct {
                 for (self.gitignore_patterns) |p| self.allocator.free(p);
                 self.allocator.free(self.gitignore_patterns);
                 self.gitignore_patterns = &.{};
+                for (self.nested_gitignores.items) |scope| {
+                    self.allocator.free(scope.prefix);
+                    for (scope.patterns) |p| self.allocator.free(p);
+                    self.allocator.free(scope.patterns);
+                }
+                self.nested_gitignores.deinit(self.allocator);
+                self.nested_gitignores = std.ArrayList(NestedGitignore).empty;
             }
             var actual_dir = Io.Dir.cwd().openDir(self.io, ".", .{ .iterate = true }) catch return results.toOwnedSlice(self.allocator);
             defer actual_dir.close(self.io);
@@ -44,10 +57,11 @@ pub const FileList = struct {
                 switch (entry.kind) {
                     .directory => {
                         if (self.suppress_file_rules or !self.isDirExcluded(entry.path)) {
+                            if (!self.suppress_file_rules) try self.loadNestedGitignore(entry.path);
                             try walker.enter(self.io, entry);
                         }
                     },
-                    .file => {
+                    .file, .sym_link => {
                         if (!self.suppress_file_rules and self.isExcluded(entry.path)) continue;
                         if (try self.fileInfo(entry.path)) |info| try results.append(self.allocator, info);
                     },
@@ -66,12 +80,19 @@ pub const FileList = struct {
         for (self.gitignore_patterns) |pattern| {
             if (matchGitignoreFile(pattern, rel_path, base)) return true;
         }
+        for (self.nested_gitignores.items) |scope| {
+            if (matchNestedGitignore(scope, rel_path)) return true;
+        }
         return false;
     }
 
     fn isDirExcluded(self: *FileList, rel_path: []const u8) bool {
-        return checkDirExcluded(self.config.excludes, rel_path) or
-            checkDirExcluded(self.gitignore_patterns, rel_path);
+        if (checkDirExcluded(self.config.excludes, rel_path)) return true;
+        if (checkDirExcluded(self.gitignore_patterns, rel_path)) return true;
+        for (self.nested_gitignores.items) |scope| {
+            if (matchNestedGitignore(scope, rel_path)) return true;
+        }
+        return false;
     }
 
     fn checkDirExcluded(patterns: []const []const u8, rel_path: []const u8) bool {
@@ -93,14 +114,32 @@ pub const FileList = struct {
         return false;
     }
 
-    fn matchGitignoreFile(pattern: []const u8, rel_path: []const u8, base: []const u8) bool {
-        const rooted = std.mem.startsWith(u8, pattern, "/");
-        const inner = if (rooted) pattern[1..] else pattern;
-        if (rooted) {
-            return globMatch(inner, rel_path);
-        } else {
-            return globMatch(inner, rel_path) or globMatch(inner, base);
+    fn loadNestedGitignore(self: *FileList, dir_path: []const u8) !void {
+        const gitignore_path = try std.fmt.allocPrint(self.allocator, "{s}/.gitignore", .{dir_path});
+        defer self.allocator.free(gitignore_path);
+        const file = Io.Dir.cwd().openFile(self.io, gitignore_path, .{}) catch return;
+        defer file.close(self.io);
+        var rbuf: [4096]u8 = undefined;
+        var reader = Io.File.Reader.init(file, self.io, &rbuf);
+        var content = std.ArrayList(u8).empty;
+        defer content.deinit(self.allocator);
+        try reader.interface.appendRemaining(self.allocator, &content, .unlimited);
+        var patterns = std.ArrayList([]const u8).empty;
+        var lines = std.mem.splitScalar(u8, content.items, '\n');
+        while (lines.next()) |raw| {
+            const line = std.mem.trim(u8, raw, " \t\r");
+            if (line.len == 0 or line[0] == '#' or line[0] == '!') continue;
+            try patterns.append(self.allocator, try self.allocator.dupe(u8, line));
         }
+        if (patterns.items.len == 0) {
+            patterns.deinit(self.allocator);
+            return;
+        }
+        const prefix = try std.fmt.allocPrint(self.allocator, "{s}/", .{dir_path});
+        try self.nested_gitignores.append(self.allocator, .{
+            .prefix = prefix,
+            .patterns = try patterns.toOwnedSlice(self.allocator),
+        });
     }
 
     fn loadGitignore(self: *FileList) ![]const []const u8 {
@@ -145,7 +184,6 @@ pub const FileList = struct {
             if (!containsId(ids.items, locale_id)) try ids.append(self.allocator, locale_id);
         }
         // match language-specific wordlists
-        var has_language_match = false;
         const base = std.fs.path.basename(path);
         for (self.config.languages) |lang| {
             if (std.mem.eql(u8, lang.name, "english") or std.mem.eql(u8, lang.name, "spellr")) continue;
@@ -160,17 +198,10 @@ pub const FileList = struct {
                 matched = self.matchesHashbang(path, lang.hashbangs);
             }
             if (matched) {
-                has_language_match = true;
                 if (wordlistIdForLang(lang.name)) |wid| {
                     if (!containsId(ids.items, wid)) try ids.append(self.allocator, wid);
                 }
             }
-        }
-
-        // No language matched — skip the file (English only applies alongside a matched language)
-        if (!has_language_match) {
-            ids.deinit(self.allocator);
-            return null;
         }
 
         try ids.append(self.allocator, .spellr);
@@ -184,19 +215,44 @@ pub const FileList = struct {
     fn matchesHashbang(self: *FileList, path: []const u8, hashbangs: []const []const u8) bool {
         const file = Io.Dir.cwd().openFile(self.io, path, .{}) catch return false;
         defer file.close(self.io);
-        var rbuf: [128]u8 = undefined;
+        var rbuf: [256]u8 = undefined;
         var reader = Io.File.Reader.init(file, self.io, &rbuf);
-        var buf: [128]u8 = undefined;
-        var iw = Io.Writer.fixed(&buf);
-        const n = reader.interface.stream(&iw, .unlimited) catch 0;
-        const first = buf[0..@min(n, buf.len)];
+        var content = std.ArrayList(u8).empty;
+        defer content.deinit(self.allocator);
+        reader.interface.appendRemaining(self.allocator, &content, .unlimited) catch {};
+        const first = content.items;
         if (!std.mem.startsWith(u8, first, "#!")) return false;
-        const line_end = std.mem.indexOfScalar(u8, first, '\n') orelse n;
+        const line_end = std.mem.indexOfScalar(u8, first, '\n') orelse first.len;
         const shebang = first[2..line_end];
         for (hashbangs) |hb| if (std.mem.indexOf(u8, shebang, hb) != null) return true;
         return false;
     }
 };
+
+fn matchGitignoreFile(pattern: []const u8, rel_path: []const u8, base: []const u8) bool {
+    const rooted = std.mem.startsWith(u8, pattern, "/");
+    const inner = if (rooted) pattern[1..] else pattern;
+    // If the effective pattern contains '/', use path-aware matching where * doesn't cross /
+    // (gitignore rule: patterns with interior / are anchored path patterns)
+    if (std.mem.indexOfScalar(u8, inner, '/') != null) {
+        return globMatchPathAware(inner, rel_path);
+    }
+    if (rooted) {
+        return globMatch(inner, rel_path);
+    } else {
+        return globMatch(inner, base);
+    }
+}
+
+fn matchNestedGitignore(scope: NestedGitignore, rel_path: []const u8) bool {
+    if (!std.mem.startsWith(u8, rel_path, scope.prefix)) return false;
+    const rel = rel_path[scope.prefix.len..];
+    const base = std.fs.path.basename(rel);
+    for (scope.patterns) |pattern| {
+        if (matchGitignoreFile(pattern, rel, base)) return true;
+    }
+    return false;
+}
 
 fn wordlistIdForLang(name: []const u8) ?WordlistId {
     if (std.mem.eql(u8, name, "ruby")) return .ruby;
@@ -220,6 +276,34 @@ pub fn globMatch(pattern: []const u8, path: []const u8) bool {
         return std.mem.startsWith(u8, path, pattern) or std.mem.indexOf(u8, path, pattern) != null;
     }
     return globMatchInner(pattern, path);
+}
+
+// Path-aware glob: * does not cross /. Used for gitignore patterns that contain an interior /.
+// Exception: ** patterns match across directory boundaries (gitignore semantics).
+fn globMatchPathAware(pattern: []const u8, str: []const u8) bool {
+    if (std.mem.indexOf(u8, pattern, "**") != null) return globMatchInner(pattern, str);
+    var pi: usize = 0;
+    var si: usize = 0;
+    var star_pi: usize = 0;
+    var star_si: usize = 0;
+    var has_star = false;
+    while (si < str.len) {
+        if (pi < pattern.len and (pattern[pi] == str[si] or pattern[pi] == '?')) {
+            pi += 1;
+            si += 1;
+        } else if (pi < pattern.len and pattern[pi] == '*') {
+            has_star = true;
+            star_pi = pi + 1;
+            star_si = si;
+            pi += 1;
+        } else if (has_star and str[star_si] != '/') {
+            pi = star_pi;
+            star_si += 1;
+            si = star_si;
+        } else return false;
+    }
+    while (pi < pattern.len and pattern[pi] == '*') pi += 1;
+    return pi == pattern.len;
 }
 
 fn globMatchInner(pattern: []const u8, str: []const u8) bool {
