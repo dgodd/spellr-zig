@@ -32,9 +32,12 @@ pub const LineTokenizer = struct {
             if (self.tryDisableDirective()) continue;
             if (self.trySkips()) continue;
             if (self.tryAfterKeySkips()) continue;
+            const before = self.pos;
             if (self.scanTerm()) |tok| return tok;
-            // advance past anything we couldn't match
-            self.pos += 1;
+            // Only advance if scanTerm itself didn't (e.g. disabled state or unknown char).
+            // When scanTerm consumed a too-short word it already moved pos; adding 1 here
+            // would skip the first character of the next word (e.g. "isSomething" → "omething").
+            if (self.pos == before) self.pos += 1;
         }
         return null;
     }
@@ -665,4 +668,18 @@ test "skip sequential letters" {
     var tok = LineTokenizer.init("abcdef hello", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("hello", t1.text);
+}
+
+test "camelCase short prefix does not eat first char of next word" {
+    // "is" is below word_min_len=3; the 'S' of "Something" must not be skipped
+    var tok = LineTokenizer.init("isSomething", 1, 3, false);
+    const t1 = tok.next().?;
+    try std.testing.expectEqualStrings("Something", t1.text);
+    try std.testing.expect(tok.next() == null);
+}
+
+test "single-char prefix does not eat next word" {
+    var tok = LineTokenizer.init("aSomething", 1, 3, false);
+    const t1 = tok.next().?;
+    try std.testing.expectEqualStrings("Something", t1.text);
 }
