@@ -77,15 +77,38 @@ pub fn loadFromFile(allocator: std.mem.Allocator, io: Io, path: []const u8) !Con
     defer content.deinit(allocator);
     try reader.interface.appendRemaining(allocator, &content, .unlimited);
     file.close(io);
-    parseYamlOverrides(&config, content.items);
+    try parseYamlOverrides(allocator, &config, content.items);
     return config;
 }
 
-fn parseYamlOverrides(config: *Config, yaml: []const u8) void {
+fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []const u8) !void {
     var lines = std.mem.splitScalar(u8, yaml, '\n');
+    var in_excludes = false;
+    var extra_excludes = std.ArrayList([]const u8).empty;
+    defer extra_excludes.deinit(allocator);
+
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r ");
         if (line.len == 0 or line[0] == '#') continue;
+
+        // Any non-indented line starts a new section.
+        if (line[0] != ' ' and line[0] != '\t') {
+            in_excludes = false;
+            if (std.mem.startsWith(u8, line, "excludes:")) {
+                in_excludes = true;
+                continue;
+            }
+        }
+
+        if (in_excludes) {
+            const trimmed = std.mem.trimStart(u8, line, " \t");
+            if (std.mem.startsWith(u8, trimmed, "- ")) {
+                const item = parseListItem(trimmed[2..]);
+                if (item.len > 0) try extra_excludes.append(allocator, try allocator.dupe(u8, item));
+            }
+            continue;
+        }
+
         if (parseKV(line, "word_minimum_length")) |v|
             config.word_minimum_length = std.fmt.parseInt(usize, v, 10) catch continue;
         if (parseKV(line, "key_heuristic_weight")) |v|
@@ -101,6 +124,18 @@ fn parseYamlOverrides(config: *Config, yaml: []const u8) void {
             }
         }
     }
+
+    if (extra_excludes.items.len > 0) {
+        var combined = std.ArrayList([]const u8).empty;
+        try combined.appendSlice(allocator, config.excludes);
+        try combined.appendSlice(allocator, extra_excludes.items);
+        config.excludes = try combined.toOwnedSlice(allocator);
+    }
+}
+
+fn parseListItem(s: []const u8) []const u8 {
+    const comment = std.mem.indexOfScalar(u8, s, '#') orelse s.len;
+    return std.mem.trim(u8, s[0..comment], " \t'\"");
 }
 
 fn parseKV(line: []const u8, key: []const u8) ?[]const u8 {
