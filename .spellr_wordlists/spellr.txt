@@ -1,5 +1,14 @@
+aarch
+antos
+d's
+dtarget
 gitignore
+gitignores
 kbuf
 lsp
+macos
+mlugg
 repl
+rfa
+softprops
 subtree

@@ -12,6 +12,7 @@ autocorrects
 backports
 baz
 behaviour
+behaviours
 beihang
 bool
 buf
@@ -33,6 +34,7 @@ configs
 const
 css
 ctrl
+ctx
 customisation
 customisations
 cwd
@@ -53,6 +55,7 @@ doptimize
 downcased
 downloader
 dryrun
+dtarget
 editmsg
 elp
 enquiry
@@ -188,6 +191,7 @@ strscan
 struct
 structs
 sublicense
+subtrees
 subwords
 sudo
 superselector
@@ -204,6 +208,7 @@ tokeniser
 tokenises
 tokenization
 tokenize
+tokenized
 tokenizer
 tokenizes
 tsx
