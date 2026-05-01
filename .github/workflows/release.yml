@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build release binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+
+      - name: Build release binaries
+        run: |
+          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu
+          mv zig-out/bin/spellr spellr-linux-x86_64
+          zig build -Doptimize=ReleaseFast -Dtarget=aarch64-macos
+          mv zig-out/bin/spellr spellr-macos-aarch64
+          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-windows
+          mv zig-out/bin/spellr.exe spellr-windows-x86_64.exe
+
+      - name: Upload binaries to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            spellr-linux-x86_64
+            spellr-macos-aarch64
+            spellr-windows-x86_64.exe
+          fail_on_unmatched_files: true
