@@ -120,11 +120,11 @@ fn appendToProjectWordlist(allocator: std.mem.Allocator, io: Io, lang_name: []co
     const normalized = try wordlist_mod.normalize(allocator, word);
     defer allocator.free(normalized);
 
+    var content = std.ArrayList(u8).empty;
+    defer content.deinit(allocator);
     if (cwd.openFile(io, path, .{})) |existing| {
         var rbuf: [8192]u8 = undefined;
         var reader = Io.File.Reader.init(existing, io, &rbuf);
-        var content = std.ArrayList(u8).empty;
-        defer content.deinit(allocator);
         try reader.interface.appendRemaining(allocator, &content, .unlimited);
         existing.close(io);
         var it = std.mem.splitScalar(u8, content.items, '\n');
