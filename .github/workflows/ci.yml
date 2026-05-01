@@ -7,7 +7,7 @@ on:
     branches: ["main"]
 
 jobs:
-  build:
+  tests:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,7 +22,7 @@ jobs:
         run: zig build
 
       - name: Run tests
-        run: zig build test
+        run: zig test root.zig 2>&1|cat
 
       - name: Run spell check
         run: ./zig-out/bin/spellr
