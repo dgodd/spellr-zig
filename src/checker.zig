@@ -99,11 +99,16 @@ pub fn loadProjectWordlists(allocator: std.mem.Allocator, io: Io) ![]Wordlist {
         var rbuf: [65536]u8 = undefined;
         var r = Io.File.Reader.init(f, io, &rbuf);
         var data = std.ArrayList(u8).empty;
-        defer data.deinit(allocator);
         try r.interface.appendRemaining(allocator, &data, .unlimited);
         f.close(io);
-        const name = entry.path[0 .. entry.path.len - 4];
-        try lists.append(allocator, try Wordlist.init(allocator, name, data.items));
+        // name: dupe because entry.path is invalidated on the next walker.next() call
+        const name = try allocator.dupe(u8, entry.path[0 .. entry.path.len - 4]);
+        errdefer allocator.free(name);
+        // data_slice: transfer ownership to Wordlist so words (slices into it) stay valid
+        const data_slice = try data.toOwnedSlice(allocator);
+        var wl = try Wordlist.init(allocator, name, data_slice);
+        wl.owned_data = data_slice;
+        try lists.append(allocator, wl);
     }
     return lists.toOwnedSlice(allocator);
 }

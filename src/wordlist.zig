@@ -4,6 +4,8 @@ const Io = std.Io;
 pub const Wordlist = struct {
     name: []const u8,
     words: [][]const u8,
+    /// Non-null when this Wordlist owns the data buffer that backs its word slices.
+    owned_data: ?[]const u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8, data: []const u8) !Wordlist {
         var list = std.ArrayList([]const u8).empty;
@@ -13,6 +15,11 @@ pub const Wordlist = struct {
             if (word.len > 0) try list.append(allocator, word);
         }
         return .{ .name = name, .words = try list.toOwnedSlice(allocator) };
+    }
+
+    pub fn deinit(self: Wordlist, allocator: std.mem.Allocator) void {
+        allocator.free(self.words);
+        if (self.owned_data) |d| allocator.free(d);
     }
 
     pub fn contains(self: Wordlist, allocator: std.mem.Allocator, word: []const u8) !bool {
@@ -123,7 +130,7 @@ test "binary search finds word" {
     const allocator = std.testing.allocator;
     const data = "aardvark\naardvarks\naback\n";
     const wl = try Wordlist.init(allocator, "test", data);
-    defer allocator.free(wl.words);
+    defer wl.deinit(allocator);
     try std.testing.expect(try wl.contains(allocator, "aardvark"));
     try std.testing.expect(try wl.contains(allocator, "Aardvark"));
     try std.testing.expect(!try wl.contains(allocator, "zzzzz"));
