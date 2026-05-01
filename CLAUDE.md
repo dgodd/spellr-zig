@@ -45,7 +45,7 @@ Zig 0.16 replaced `std.io`/`std.fs` with `std.Io` (capital I). Key patterns:
 - **dir walk**: `dir.walkSelectively(allocator)` then `walker.next(io)` — must open a real dir fd, not use the AT.FDCWD sentinel; call `walker.enter(io, entry)` to descend into a directory
 - **Io.Threaded (tests)**: `var t = std.Io.Threaded.init(allocator, .{})` (no error), `defer t.deinit()`, `t.io()` — use to construct an `Io` value in unit tests
 - **create dir**: `Io.Dir.cwd().createDirPath(io, path)`
-- **stdin (interactive)**: `Io.File.Reader.init(Io.File.stdin(), io, &buf)` + fixed 1-byte writer + `.unlimited`
+- **stdin (interactive keypress)**: use `std.posix.read(Io.File.stdin().handle, &buf)` directly — do NOT use `Io.File.Reader.stream` for this, because the first `stream` call in positional mode attempts `sendFile`, gets `error.Unimplemented` from a fixed writer, switches mode, and returns 0; the raw `posix.read` is consistent with the `tcgetattr`/`tcsetattr` calls that surround it
 - **ArrayList**: `std.ArrayList(T).empty` — allocator is passed per method call (`.append(allocator, x)`, `.deinit(allocator)`, `.toOwnedSlice(allocator)`)
 - **main signature**: `pub fn main(init: std.process.Init) !void` — `init.gpa`, `init.arena.allocator()`, `init.io`, `init.minimal.args.toSlice(arena)`
 - **args type**: `init.minimal.args.toSlice(arena)` returns `[]const [:0]const u8` (sentinel-terminated)

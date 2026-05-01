@@ -161,10 +161,7 @@ pub const Reporter = struct {
         defer std.posix.tcsetattr(stdin_file.handle, .NOW, orig) catch {};
 
         var ibuf: [1]u8 = undefined;
-        var stdin_buf: [256]u8 = undefined;
-        var stdin_reader = Io.File.Reader.init(stdin_file, self.io, &stdin_buf);
-        var stdin_w = Io.Writer.fixed(&ibuf);
-        const n = stdin_reader.interface.stream(&stdin_w, .unlimited) catch return .skip;
+        const n = std.posix.read(stdin_file.handle, &ibuf) catch return .skip;
         if (n == 0) return .skip;
         const key = ibuf[0];
 
