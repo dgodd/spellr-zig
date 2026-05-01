@@ -63,10 +63,10 @@ pub fn normalize(allocator: std.mem.Allocator, word: []const u8) ![]u8 {
     var i: usize = 0;
     while (i < word.len) {
         const c = word[i];
-        // strip curly apostrophes (U+2018/2019 = E2 80 98/99)
+        // normalize curly apostrophes (U+2018/2019 = E2 80 98/99) to plain apostrophe
         if (c == 0xE2 and i + 2 < word.len and word[i + 1] == 0x80 and
             (word[i + 2] == 0x98 or word[i + 2] == 0x99))
-        { i += 3; continue; }
+        { out[j] = '\''; j += 1; i += 3; continue; }
         // strip trailing straight apostrophe (possessives)
         if (c == '\'' and i + 1 == word.len) { i += 1; continue; }
         out[j] = std.ascii.toLower(c);

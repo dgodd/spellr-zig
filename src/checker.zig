@@ -58,7 +58,10 @@ pub fn checkFile(
         }
         if (file_disabled) continue;
 
-        var tokenizer = LineTokenizer.init(line, line_num, config.word_minimum_length, true);
+        // spellr:disable-line skips the entire line (not just the suffix after the directive)
+        if (std.mem.indexOf(u8, line, "spellr:disable-line") != null) continue;
+
+        var tokenizer = LineTokenizer.init(line, line_num, config.word_minimum_length, true, config.key_heuristic_weight);
         while (tokenizer.next()) |token| {
             if (try isKnown(allocator, token.text, wordlists, project_wordlists)) continue;
             try misses.append(allocator, .{

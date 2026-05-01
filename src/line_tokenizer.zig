@@ -12,8 +12,13 @@ pub const LineTokenizer = struct {
     disabled: bool,
     word_min_len: usize,
     skip_keys: bool,
+    key_heuristic_weight: u32,
 
-    pub fn init(line: []const u8, line_num: u32, word_min_len: usize, skip_keys: bool) LineTokenizer {
+    pub fn initDefault(line: []const u8, line_num: u32, word_min_len: usize, skip_keys: bool) LineTokenizer {
+        return init(line, line_num, word_min_len, skip_keys, 5);
+    }
+
+    pub fn init(line: []const u8, line_num: u32, word_min_len: usize, skip_keys: bool, key_heuristic_weight: u32) LineTokenizer {
         // disable-line skips everything after the directive on this line
         const disable_pos = std.mem.indexOf(u8, line, "spellr:disable-line");
         const end = if (disable_pos) |p| p else line.len;
@@ -24,6 +29,7 @@ pub const LineTokenizer = struct {
             .disabled = false,
             .word_min_len = word_min_len,
             .skip_keys = skip_keys,
+            .key_heuristic_weight = key_heuristic_weight,
         };
     }
 
@@ -84,8 +90,14 @@ pub const LineTokenizer = struct {
     // skip non-alpha chars (punctuation, digits, etc.) that can't start a word
     fn skipNotAlpha(self: *LineTokenizer) bool {
         const c = self.line[self.pos];
-        // skip anything that isn't alpha, %, /, #, \, digit
-        if (!isAlpha(c) and c != '%' and c != '/' and c != '#' and c != '\\' and !std.ascii.isDigit(c)) {
+        // Skip entire multi-byte UTF-8 sequences — wordlists are ASCII-only
+        if (c > 0x7F) {
+            const seq_len = std.unicode.utf8ByteSequenceLength(c) catch 1;
+            self.pos += @min(seq_len, self.line.len - self.pos);
+            return true;
+        }
+        // skip anything that isn't ASCII alpha, %, /, #, \, digit
+        if (!std.ascii.isAlphabetic(c) and c != '%' and c != '/' and c != '#' and c != '\\' and !std.ascii.isDigit(c)) {
             self.pos += 1;
             return true;
         }
@@ -127,10 +139,11 @@ pub const LineTokenizer = struct {
         return false;
     }
 
-    // %2F  %4A etc.
+    // %2F  %4A etc. — require at least one digit to avoid eating HAML tags like %center (%ce)
     fn skipUrlEncoded(self: *LineTokenizer) bool {
         const s = self.line[self.pos..];
         if (s.len >= 3 and s[0] == '%' and isHexDigit(s[1]) and isHexDigit(s[2])) {
+            if (!std.ascii.isDigit(s[1]) and !std.ascii.isDigit(s[2])) return false;
             self.pos += 3;
             return true;
         }
@@ -233,19 +246,20 @@ pub const LineTokenizer = struct {
             while (i < s.len and std.ascii.isAlphanumeric(s[i])) { i += 1; n += 1; }
             if (n == 7) { self.pos += i; return true; }
         }
-        // sha1-<28 base64 chars>
-        if (startsWith(s, "sha1-")) {
-            var i: usize = 5;
-            var n: usize = 0;
-            while (i < s.len and isBase64Char(s[i])) { i += 1; n += 1; }
-            if (n == 28) { self.pos += i; return true; }
-        }
-        // sha512-<88 chars>
-        if (startsWith(s, "sha512-")) {
-            var i: usize = 7;
-            var n: usize = 0;
-            while (i < s.len and (isBase64Char(s[i]) or s[i] == ';')) { i += 1; n += 1; }
-            if (n == 88) { self.pos += i; return true; }
+        // sha<N>-<base64> SRI hashes
+        const sha_sizes = [_]struct { prefix: []const u8, b64_len: usize }{
+            .{ .prefix = "sha1-",   .b64_len = 28 },
+            .{ .prefix = "sha256-", .b64_len = 44 },
+            .{ .prefix = "sha384-", .b64_len = 64 },
+            .{ .prefix = "sha512-", .b64_len = 88 },
+        };
+        for (sha_sizes) |sha| {
+            if (startsWith(s, sha.prefix)) {
+                var i: usize = sha.prefix.len;
+                var n: usize = 0;
+                while (i < s.len and isBase64Char(s[i])) { i += 1; n += 1; }
+                if (n == sha.b64_len) { self.pos += i; return true; }
+            }
         }
         // data:mime;base64,...
         if (startsWith(s, "data:")) {
@@ -266,7 +280,7 @@ pub const LineTokenizer = struct {
             return true;
         }
         if (!hasMinAlpha(chunk, 3)) return false;
-        if (key_detector.isKey(chunk)) {
+        if (key_detector.isKey(chunk, self.key_heuristic_weight)) {
             self.pos += chunk.len;
             return true;
         }
@@ -349,25 +363,30 @@ pub const LineTokenizer = struct {
                 },
                 .upper => {
                     while (i < self.line.len - start and isUpper(self.line[start + i])) i += 1;
-                    // If the run ends before a lowercase letter, back up one: the last uppercase
-                    // char starts the next title-case word (e.g. "PDFRenderers" → "PDF"+"Renderers").
-                    // Exception: lowercase 's' not followed by another lowercase is a plural suffix.
-                    if (i > 1 and start + i < self.line.len and isLower(self.line[start + i])) {
-                        const nc = self.line[start + i];
-                        const after = start + i + 1;
-                        const is_plural = nc == 's' and (after >= self.line.len or !isLower(self.line[after]));
-                        if (!is_plural) i -= 1;
+                    // Match Ruby's UPPER_CASE_RE lookahead: (?=[[:upper:]][[:lower:]]|\b)
+                    // Find the largest k satisfying: word-boundary OR start of title-case (upper+lower).
+                    var k = i;
+                    while (k > 0) {
+                        const p = start + k;
+                        if (p >= self.line.len) break; // end of string = word boundary
+                        const nc = self.line[p];
+                        if (!isWordChar(nc)) break; // non-word char = word boundary
+                        // Title-case start requires at least 2 lowercase chars (avoids breaking at plural -s)
+                        if (isUpper(nc) and p + 2 < self.line.len and isLower(self.line[p + 1]) and isLower(self.line[p + 2])) break;
+                        k -= 1;
                     }
-                    // WORDs suffix: lowercase 's' at end not followed by lower → include it
-                    if (start + i < self.line.len and self.line[start + i] == 's') {
-                        const after = start + i + 1;
-                        if (after >= self.line.len or !isLower(self.line[after])) i += 1;
+                    i = k;
+                    // Extend through apostrophe contractions: DOESN'T, WON'T, etc.
+                    if (start + i < self.line.len and self.line[start + i] == '\'') {
+                        var j = i + 1;
+                        while (start + j < self.line.len and isUpper(self.line[start + j])) j += 1;
+                        if (j > i + 1) i = j;
                     }
                 },
                 else => unreachable,
             }
             const word = self.line[start .. start + i];
-            if (word.len >= self.word_min_len) {
+            if (word.len >= self.word_min_len and !isUnicodeAdjacent(self.line, start, start + i)) {
                 self.pos = start + i;
                 return Token{ .text = word, .line = self.line_num, .col = @intCast(start), .case_kind = case_kind };
             }
@@ -381,29 +400,12 @@ pub const LineTokenizer = struct {
             while (i < self.line.len - start and isLower(self.line[start + i])) i += 1;
             i = scanContractions(self.line[start..], i);
             const word = self.line[start .. start + i];
-            if (word.len >= self.word_min_len) {
+            if (word.len >= self.word_min_len and !isUnicodeAdjacent(self.line, start, start + i)) {
                 self.pos = start + i;
                 return Token{ .text = word, .line = self.line_num, .col = @intCast(start), .case_kind = .lower };
             }
             self.pos = start + i;
             return null;
-        }
-
-        // non-Latin alphabetic (Arabic, CJK treated as alpha via UTF-8 multibyte)
-        if (c > 0x7F) {
-            // consume entire multibyte sequence as a single token
-            var i: usize = 0;
-            while (i < self.line.len - start) {
-                const byte = self.line[start + i];
-                if (byte < 0x80) break; // back to ASCII
-                const seq_len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
-                i += seq_len;
-            }
-            if (i > 0) {
-                const word = self.line[start .. start + i];
-                self.pos = start + i;
-                return Token{ .text = word, .line = self.line_num, .col = @intCast(start), .case_kind = .other };
-            }
         }
 
         return null;
@@ -415,23 +417,31 @@ pub const LineTokenizer = struct {
 /// Extend `i` past any apostrophe-contraction groups in `word[i..]`,
 /// but stop before a possessive `'s` (apostrophe + single 's' + non-lower-or-end).
 fn scanContractions(word: []const u8, start_i: usize) usize {
+    if (start_i < 2) return start_i; // don't extend single-char prefixes like a'la
     var i = start_i;
-    while (i + 1 < word.len and isApostrophe(word[i]) and isLower(word[i + 1])) {
+    while (i < word.len and isApostrophe(word[i])) {
         const apos_len = utf8ApostropheLen(word[i]);
         const after_apos = i + apos_len;
+        if (after_apos >= word.len or !isLower(word[after_apos])) break;
         // Stop at possessive 's: apostrophe + 's' + (end or non-lower)
-        if (after_apos < word.len and word[after_apos] == 's') {
+        if (word[after_apos] == 's') {
             const after_s = after_apos + 1;
             if (after_s >= word.len or !isLower(word[after_s])) break;
         }
-        i += apos_len;
+        i = after_apos;
         while (i < word.len and isLower(word[i])) i += 1;
     }
     return i;
 }
 
+fn isUnicodeAdjacent(line: []const u8, start: usize, end: usize) bool {
+    if (start > 0 and line[start - 1] >= 0x80) return true;
+    if (end < line.len and line[end] >= 0x80) return true;
+    return false;
+}
+
 fn isAlpha(c: u8) bool {
-    return std.ascii.isAlphabetic(c) or c > 0x7F;
+    return std.ascii.isAlphabetic(c);
 }
 fn isUpper(c: u8) bool { return c >= 'A' and c <= 'Z'; }
 fn isLower(c: u8) bool { return c >= 'a' and c <= 'z'; }
@@ -626,7 +636,7 @@ fn matchDataUrl(s: []const u8) ?usize {
 // ── tests ──────────────────────────────────────────────────────────────────
 
 test "basic lower word" {
-    var tok = LineTokenizer.init("hello world", 1, 3, false);
+    var tok = LineTokenizer.initDefault("hello world", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("hello", t1.text);
     const t2 = tok.next().?;
@@ -635,27 +645,27 @@ test "basic lower word" {
 }
 
 test "title case" {
-    var tok = LineTokenizer.init("Hello World", 1, 3, false);
+    var tok = LineTokenizer.initDefault("Hello World", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("Hello", t1.text);
     try std.testing.expect(t1.case_kind == .title);
 }
 
 test "upper case" {
-    var tok = LineTokenizer.init("FOO BAR", 1, 3, false);
+    var tok = LineTokenizer.initDefault("FOO BAR", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("FOO", t1.text);
     try std.testing.expect(t1.case_kind == .upper);
 }
 
 test "skip hex color" {
-    var tok = LineTokenizer.init("#abc hello", 1, 3, false);
+    var tok = LineTokenizer.initDefault("#abc hello", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("hello", t1.text);
 }
 
 test "skip url" {
-    var tok = LineTokenizer.init("see https://example.com/foo for details", 1, 3, false);
+    var tok = LineTokenizer.initDefault("see https://example.com/foo for details", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("see", t1.text);
     const t2 = tok.next().?;
@@ -665,34 +675,41 @@ test "skip url" {
 }
 
 test "disable line directive" {
-    var tok = LineTokenizer.init("hello spellr:disable-line typo", 1, 3, false);
+    var tok = LineTokenizer.initDefault("hello spellr:disable-line typo", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("hello", t1.text);
     try std.testing.expect(tok.next() == null);
 }
 
 test "skip repeated letters" {
-    var tok = LineTokenizer.init("xxxxxxxx hello", 1, 3, false);
+    var tok = LineTokenizer.initDefault("xxxxxxxx hello", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("hello", t1.text);
 }
 
 test "skip sequential letters" {
-    var tok = LineTokenizer.init("abcdef hello", 1, 3, false);
+    var tok = LineTokenizer.initDefault("abcdef hello", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("hello", t1.text);
 }
 
 test "camelCase short prefix does not eat first char of next word" {
     // "is" is below word_min_len=3; the 'S' of "Something" must not be skipped
-    var tok = LineTokenizer.init("isSomething", 1, 3, false);
+    var tok = LineTokenizer.initDefault("isSomething", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("Something", t1.text);
     try std.testing.expect(tok.next() == null);
 }
 
 test "single-char prefix does not eat next word" {
-    var tok = LineTokenizer.init("aSomething", 1, 3, false);
+    var tok = LineTokenizer.initDefault("aSomething", 1, 3, false);
     const t1 = tok.next().?;
     try std.testing.expectEqualStrings("Something", t1.text);
+}
+
+test "center not split" {
+    var tok = LineTokenizer.initDefault("    %center", 1, 3, true);
+    const t1 = tok.next().?;
+    try std.testing.expectEqualStrings("center", t1.text);
+    try std.testing.expect(tok.next() == null);
 }
