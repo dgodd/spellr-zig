@@ -61,7 +61,7 @@ pub const FileList = struct {
     fn isExcluded(self: *FileList, rel_path: []const u8) bool {
         const base = std.fs.path.basename(rel_path);
         for (self.config.excludes) |pattern| {
-            if (globMatch(pattern, rel_path) or globMatch(pattern, base)) return true;
+            if (matchGitignoreFile(pattern, rel_path, base)) return true;
         }
         for (self.gitignore_patterns) |pattern| {
             if (matchGitignoreFile(pattern, rel_path, base)) return true;
