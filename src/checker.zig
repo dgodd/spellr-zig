@@ -10,6 +10,7 @@ pub const Miss = struct {
     token: Token,
     path: []const u8,
     text: []const u8,
+    line_text: []const u8,
 };
 
 pub fn checkFile(
@@ -64,6 +65,7 @@ pub fn checkFile(
                 .token = token,
                 .path = path,
                 .text = try allocator.dupe(u8, token.text),
+                .line_text = try allocator.dupe(u8, line),
             });
         }
     }

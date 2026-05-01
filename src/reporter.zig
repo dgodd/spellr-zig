@@ -22,6 +22,8 @@ pub const Reporter = struct {
     wordlist_words: std.StringHashMap(void),
     replace_all: std.StringHashMap([]const u8),
     skip_all: std.StringHashMap(void),
+    error_paths: std.ArrayList([]const u8),
+    error_path_set: std.StringHashMap(void),
     found_errors: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, mode: Mode) Reporter {
@@ -32,6 +34,8 @@ pub const Reporter = struct {
             .wordlist_words = std.StringHashMap(void).init(allocator),
             .replace_all = std.StringHashMap([]const u8).init(allocator),
             .skip_all = std.StringHashMap(void).init(allocator),
+            .error_paths = std.ArrayList([]const u8).empty,
+            .error_path_set = std.StringHashMap(void).init(allocator),
         };
     }
 
@@ -39,6 +43,9 @@ pub const Reporter = struct {
         self.wordlist_words.deinit();
         self.replace_all.deinit();
         self.skip_all.deinit();
+        for (self.error_paths.items) |p| self.allocator.free(p);
+        self.error_paths.deinit(self.allocator);
+        self.error_path_set.deinit();
     }
 
     pub fn startFile(self: *Reporter, path: []const u8) void {
@@ -57,10 +64,18 @@ pub const Reporter = struct {
                 return .skip;
             },
             .default => {
-                var buf: [1024]u8 = undefined;
-                var w: Io.File.Writer = .init(.stderr(), self.io, &buf);
-                try w.interface.print("{s}:{d}:{d}: unknown word \"{s}\"\n", .{
-                    miss.path, miss.token.line, miss.token.col + 1, miss.text,
+                if (!self.error_path_set.contains(miss.path)) {
+                    const duped = try self.allocator.dupe(u8, miss.path);
+                    try self.error_paths.append(self.allocator, duped);
+                    try self.error_path_set.put(duped, {});
+                }
+                const col = miss.token.col;
+                const before = std.mem.trimStart(u8, miss.line_text[0..col], " \t");
+                const after = std.mem.trimEnd(u8, miss.line_text[col + miss.text.len ..], " \t\r\n");
+                var buf: [8192]u8 = undefined;
+                var w: Io.File.Writer = .init(.stdout(), self.io, &buf);
+                try w.interface.print("\x1b[36m{s}:{d}:{d}\x1b[0m {s}\x1b[1;31m{s}\x1b[0m{s}\n", .{
+                    miss.path, miss.token.line, col, before, miss.text, after,
                 });
                 try w.flush();
                 return .skip;
@@ -86,12 +101,23 @@ pub const Reporter = struct {
                 try out.flush();
             },
             .default => {
-                if (self.found_errors) {
-                    var buf: [512]u8 = undefined;
-                    var w: Io.File.Writer = .init(.stderr(), self.io, &buf);
-                    try w.interface.print("\n{d} error(s). Run `spellr --interactive` to fix.\n", .{self.error_count});
-                    try w.flush();
+                var buf: [8192]u8 = undefined;
+                var w: Io.File.Writer = .init(.stderr(), self.io, &buf);
+                const file_s: []const u8 = if (self.file_count == 1) "file" else "files";
+                const error_s: []const u8 = if (self.error_count == 1) "error" else "errors";
+                try w.interface.print("\n{d} {s} checked\n{d} {s} found", .{
+                    self.file_count, file_s, self.error_count, error_s,
+                });
+                if (self.error_count > 0) {
+                    try w.interface.print("\n\nto add or replace words interactively, run:\n  spellr --interactive", .{});
+                    if (self.error_paths.items.len <= 20) {
+                        for (self.error_paths.items) |p| try w.interface.print(" {s}", .{p});
+                    }
+                    try w.interface.print("\n", .{});
+                } else {
+                    try w.interface.print("\n", .{});
                 }
+                try w.flush();
             },
             else => {},
         }
@@ -106,10 +132,14 @@ pub const Reporter = struct {
         const suggs = try suggester.suggestions(self.allocator, miss.token, wordlists);
         defer { for (suggs) |s| self.allocator.free(s); self.allocator.free(suggs); }
 
+        const col = miss.token.col;
+        const before = std.mem.trimStart(u8, miss.line_text[0..col], " \t");
+        const after = std.mem.trimEnd(u8, miss.line_text[col + miss.text.len ..], " \t\r\n");
+
         var buf: [2048]u8 = undefined;
         var w: Io.File.Writer = .init(.stderr(), self.io, &buf);
-        try w.interface.print("\n\x1b[31m{s}:{d}:{d}: unknown word \"{s}\"\x1b[0m\n", .{
-            miss.path, miss.token.line, miss.token.col + 1, miss.text,
+        try w.interface.print("\n\x1b[36m{s}:{d}:{d}\x1b[0m {s}\x1b[1;31m{s}\x1b[0m{s}\n", .{
+            miss.path, miss.token.line, col, before, miss.text, after,
         });
         for (suggs, 0..) |s, i| try w.interface.print("  [{d}] {s}\n", .{ i + 1, s });
         try w.interface.print("  [a]dd  [r]eplace  [R]eplace all  [s]kip  [S]kip all  [^C] quit\n> ", .{});
@@ -155,7 +185,7 @@ pub const Reporter = struct {
             var buf: [512]u8 = undefined;
             var w: Io.File.Writer = .init(.stderr(), self.io, &buf);
             try w.interface.print("{s}:{d}:{d}: no suggestion for \"{s}\"\n", .{
-                miss.path, miss.token.line, miss.token.col + 1, miss.text,
+                miss.path, miss.token.line, miss.token.col, miss.text,
             });
             try w.flush();
             return .skip;
