@@ -116,6 +116,7 @@ fn jaro(s1: []const u8, s2: []const u8) f64 {
     for (s1, 0..) |c1, i| {
         const start = if (i > match_dist) i - match_dist else 0;
         const end = @min(i + match_dist + 1, s2.len);
+        if (start >= end) continue;
         for (s2[start..end], start..) |c2, j| {
             if (s2_matches[j] or c1 != c2) continue;
             s1_matches[i] = true;
