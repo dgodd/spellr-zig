@@ -15,6 +15,7 @@ pub const FileList = struct {
     io: Io,
     config: *const Config,
     suppress_file_rules: bool,
+    gitignore_patterns: []const []const u8 = &.{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: *const Config, suppress_file_rules: bool) FileList {
         return .{ .allocator = allocator, .io = io, .config = config, .suppress_file_rules = suppress_file_rules };
@@ -27,14 +28,31 @@ pub const FileList = struct {
                 if (try self.fileInfo(p)) |info| try results.append(self.allocator, info);
             }
         } else {
+            if (!self.suppress_file_rules) {
+                self.gitignore_patterns = try self.loadGitignore();
+            }
+            defer {
+                for (self.gitignore_patterns) |p| self.allocator.free(p);
+                self.allocator.free(self.gitignore_patterns);
+                self.gitignore_patterns = &.{};
+            }
             var actual_dir = Io.Dir.cwd().openDir(self.io, ".", .{ .iterate = true }) catch return results.toOwnedSlice(self.allocator);
             defer actual_dir.close(self.io);
-            var walker = try actual_dir.walk(self.allocator);
+            var walker = try actual_dir.walkSelectively(self.allocator);
             defer walker.deinit();
             while (try walker.next(self.io)) |entry| {
-                if (entry.kind != .file) continue;
-                if (!self.suppress_file_rules and self.isExcluded(entry.path)) continue;
-                if (try self.fileInfo(entry.path)) |info| try results.append(self.allocator, info);
+                switch (entry.kind) {
+                    .directory => {
+                        if (self.suppress_file_rules or !self.isDirExcluded(entry.path)) {
+                            try walker.enter(self.io, entry);
+                        }
+                    },
+                    .file => {
+                        if (!self.suppress_file_rules and self.isExcluded(entry.path)) continue;
+                        if (try self.fileInfo(entry.path)) |info| try results.append(self.allocator, info);
+                    },
+                    else => {},
+                }
             }
         }
         return results.toOwnedSlice(self.allocator);
@@ -45,7 +63,62 @@ pub const FileList = struct {
         for (self.config.excludes) |pattern| {
             if (globMatch(pattern, rel_path) or globMatch(pattern, base)) return true;
         }
+        for (self.gitignore_patterns) |pattern| {
+            if (matchGitignoreFile(pattern, rel_path, base)) return true;
+        }
         return false;
+    }
+
+    fn isDirExcluded(self: *FileList, rel_path: []const u8) bool {
+        return checkDirExcluded(self.config.excludes, rel_path) or
+            checkDirExcluded(self.gitignore_patterns, rel_path);
+    }
+
+    fn checkDirExcluded(patterns: []const []const u8, rel_path: []const u8) bool {
+        const base = std.fs.path.basename(rel_path);
+        for (patterns) |pattern| {
+            const rooted = std.mem.startsWith(u8, pattern, "/");
+            const inner = if (rooted) pattern[1..] else pattern;
+            if (std.mem.endsWith(u8, inner, "/")) {
+                // dir pattern (trailing slash): strip it and match
+                const dir_name = inner[0 .. inner.len - 1];
+                if (globMatchInner(dir_name, rel_path)) return true;
+                if (!rooted) if (globMatchInner(dir_name, base)) return true;
+            } else {
+                // plain pattern: root-relative matches full path; relative matches base too
+                if (globMatchInner(inner, rel_path)) return true;
+                if (!rooted) if (globMatch(pattern, base)) return true;
+            }
+        }
+        return false;
+    }
+
+    fn matchGitignoreFile(pattern: []const u8, rel_path: []const u8, base: []const u8) bool {
+        const rooted = std.mem.startsWith(u8, pattern, "/");
+        const inner = if (rooted) pattern[1..] else pattern;
+        if (rooted) {
+            return globMatch(inner, rel_path);
+        } else {
+            return globMatch(inner, rel_path) or globMatch(inner, base);
+        }
+    }
+
+    fn loadGitignore(self: *FileList) ![]const []const u8 {
+        var patterns = std.ArrayList([]const u8).empty;
+        const file = Io.Dir.cwd().openFile(self.io, ".gitignore", .{}) catch return patterns.toOwnedSlice(self.allocator);
+        defer file.close(self.io);
+        var rbuf: [4096]u8 = undefined;
+        var reader = Io.File.Reader.init(file, self.io, &rbuf);
+        var content = std.ArrayList(u8).empty;
+        defer content.deinit(self.allocator);
+        try reader.interface.appendRemaining(self.allocator, &content, .unlimited);
+        var lines = std.mem.splitScalar(u8, content.items, '\n');
+        while (lines.next()) |raw| {
+            const line = std.mem.trim(u8, raw, " \t\r");
+            if (line.len == 0 or line[0] == '#' or line[0] == '!') continue;
+            try patterns.append(self.allocator, try self.allocator.dupe(u8, line));
+        }
+        return patterns.toOwnedSlice(self.allocator);
     }
 
     fn fileInfo(self: *FileList, path: []const u8) !?FileInfo {
