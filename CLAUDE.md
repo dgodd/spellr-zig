@@ -1,6 +1,6 @@
 # spellr (Zig implementation)
 
-This is a Zig 0.16.0 reimplementation of [spellr](https://github.com/robotdana/spellr), a source-code-aware spell checker originally written in Ruby. The Zig implementation lives in `zig/` within the parent spellr repository.
+This is a standalone Zig 0.16.0 reimplementation of [spellr](https://github.com/robotdana/spellr), a source-code-aware spell checker originally written in Ruby.
 
 ## Build and test
 
@@ -10,29 +10,28 @@ zig build test     # run unit tests
 zig build run      # build and run
 ```
 
-Requires Zig 0.16.0 exactly. The wordlists at `../wordlists/` are embedded at compile time via `@embedFile` through the `wordlists/` symlink at the project root.
+Requires Zig 0.16.0 exactly. Wordlists are embedded at compile time via `@embedFile` from the `wordlists/` directory at the project root.
 
 ## Project structure
 
 ```
-zig/
-  root.zig              # entry point (re-exports main from src/main.zig)
-  build.zig             # build script
-  build.zig.zon         # package manifest
-  wordlists -> ../wordlists   # symlink so @embedFile can reach parent dir
-  src/
-    main.zig            # CLI wiring: args → config → files → check → report
-    cli.zig             # argument parsing, Options struct
-    config.zig          # .spellr.yml parsing, Config/LanguageConfig structs
-    file_list.zig       # directory walk, glob matching, language detection
-    checker.zig         # file reading, line iteration, miss collection
-    line_tokenizer.zig  # byte-cursor scanner: CamelCase/UPPER/lower tokens
-    token.zig           # Token and CaseKind types
-    key_detector.zig    # Naive Bayes key/API-secret classifier
-    wordlist.zig        # sorted wordlist binary search + embedded wordlists
-    suggester.zig       # Jaro-Winkler + Damerau-Levenshtein suggestion engine
-    reporter.zig        # output modes: default, quiet, wordlist, interactive, autocorrect
-    rewriter.zig        # in-place file rewriting for autocorrect/interactive replace
+root.zig              # entry point (re-exports main from src/main.zig)
+build.zig             # build script
+build.zig.zon         # package manifest
+wordlists/            # plain-text wordlist files embedded at compile time
+src/
+  main.zig            # CLI wiring: args → config → files → check → report
+  cli.zig             # argument parsing, Options struct
+  config.zig          # .spellr.yml parsing, Config/LanguageConfig structs
+  file_list.zig       # directory walk, glob matching, language detection
+  checker.zig         # file reading, line iteration, miss collection
+  line_tokenizer.zig  # byte-cursor scanner: CamelCase/UPPER/lower tokens
+  token.zig           # Token and CaseKind types
+  key_detector.zig    # Naive Bayes key/API-secret classifier
+  wordlist.zig        # sorted wordlist binary search + embedded wordlists
+  suggester.zig       # Jaro-Winkler + Damerau-Levenshtein suggestion engine
+  reporter.zig        # output modes: default, quiet, wordlist, interactive, autocorrect
+  rewriter.zig        # in-place file rewriting for autocorrect/interactive replace
 ```
 
 ## Zig 0.16 API patterns used throughout
@@ -70,6 +69,8 @@ Zig 0.16 replaced `std.io`/`std.fs` with `std.Io` (capital I). Key patterns:
 
 Then it scans a word token and classifies it as `.lower`, `.upper`, `.title`, or `.other` (non-Latin Unicode).
 
+**UPPER apostrophe handling**: after scanning an UPPER run, `scanTerm` tries to extend through an apostrophe contraction (DOESN'T, WON'T). It only extends if the uppercase letters after the apostrophe are *not* immediately followed by a lowercase letter — this prevents "D'Santos" being tokenized as "D'S" + "antos" instead of correctly yielding "Santos" as a separate `.title` token.
+
 ## Key detector
 
 `key_detector.isKey(s)` is only called from `skipKeyHeuristic`, which first gates on:
@@ -100,6 +101,17 @@ Project-specific wordlists are read from `.spellr_wordlists/*.txt` at runtime.
 5. Return "mistypes" (DL ≤ 25% of length) or fall back to closest "misspell"
 6. Filter to within 98% of the best similarity score
 7. Apply original word's case transformation to suggestions
+
+## Parallel processing (`main.zig`)
+
+Files are checked in parallel by default using a work-stealing thread pool built from raw `std.Thread.spawn` (Zig 0.16 has no `std.Thread.Pool`).
+
+- `WorkCtx` holds the file list, a `results` slice, and an atomic work counter (`next_work`).
+- Worker threads call `fetchAdd(.monotonic)` to claim file indices and write results into `results[idx]`.
+- Each worker allocates its arena from `std.heap.page_allocator` (always thread-safe) to avoid GPA contention.
+- Each `FileResult` has a `done: std.atomic.Value(bool)` flag written with `.release` and read by the main thread with `.acquire`.
+- The main thread consumes results in order (index 0, 1, 2, …), spinning with `Thread.yield` until each `done` flag is set, so output is deterministic regardless of completion order.
+- `-j N` / `--jobs N` sets the worker count; `--no-parallel` disables threading entirely. Interactive and autocorrect modes always run sequentially.
 
 ## Reporter modes
 
