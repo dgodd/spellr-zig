@@ -8,6 +8,55 @@ const checker_mod = @import("checker.zig");
 const reporter_mod = @import("reporter.zig");
 const rewriter_mod = @import("rewriter.zig");
 
+const num_wordlist_ids = @typeInfo(wordlist_mod.WordlistId).@"enum".fields.len;
+
+const FileResult = struct {
+    arena: std.heap.ArenaAllocator,
+    misses: []checker_mod.Miss = &.{},
+    done: std.atomic.Value(bool) = .init(false),
+};
+
+const WorkCtx = struct {
+    files: []const file_list_mod.FileInfo,
+    results: []FileResult,
+    next_work: std.atomic.Value(usize),
+    id_to_ptr: *const [num_wordlist_ids]*const wordlist_mod.Wordlist,
+    project_wordlists: []const wordlist_mod.Wordlist,
+    config: *const config_mod.Config,
+    io: Io,
+};
+
+fn processFile(ctx: *WorkCtx, idx: usize) void {
+    const fi = ctx.files[idx];
+    // page_allocator is always thread-safe; avoids touching the GPA from workers
+    ctx.results[idx].arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const fa = ctx.results[idx].arena.allocator();
+    var wl_ptrs = std.ArrayList(*const wordlist_mod.Wordlist).empty;
+    for (fi.wordlist_ids) |wid| {
+        wl_ptrs.append(fa, ctx.id_to_ptr[@intFromEnum(wid)]) catch {
+            ctx.results[idx].done.store(true, .release);
+            return;
+        };
+    }
+    ctx.results[idx].misses = checker_mod.checkFile(
+        fa,
+        ctx.io,
+        fi.path,
+        wl_ptrs.items,
+        ctx.project_wordlists,
+        ctx.config,
+    ) catch &.{};
+    ctx.results[idx].done.store(true, .release);
+}
+
+fn workerThread(ctx: *WorkCtx) void {
+    while (true) {
+        const idx = ctx.next_work.fetchAdd(1, .monotonic);
+        if (idx >= ctx.files.len) break;
+        processFile(ctx, idx);
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
@@ -35,9 +84,8 @@ pub fn main(init: std.process.Init) !void {
     var embedded = try wordlist_mod.loadAll(arena);
 
     // build id → pointer map
-    const num_ids = @typeInfo(wordlist_mod.WordlistId).@"enum".fields.len;
-    var id_to_ptr: [num_ids]*const wordlist_mod.Wordlist = undefined;
-    for (0..num_ids) |i| id_to_ptr[i] = embedded.get(@enumFromInt(i));
+    var id_to_ptr: [num_wordlist_ids]*const wordlist_mod.Wordlist = undefined;
+    for (0..num_wordlist_ids) |i| id_to_ptr[i] = embedded.get(@enumFromInt(i));
 
     // load project wordlists
     const project_wordlists = try checker_mod.loadProjectWordlists(gpa, io);
@@ -73,6 +121,102 @@ pub fn main(init: std.process.Init) !void {
 
     var found_errors = false;
 
+    if (opts.parallel and files.len > 0) {
+        try runParallel(gpa, io, opts, files, &id_to_ptr, project_wordlists, &config, &rep, &found_errors);
+    } else {
+        try runSequential(gpa, io, files, &id_to_ptr, project_wordlists, &config, &rep, &found_errors);
+    }
+
+    try rep.finish();
+
+    if (found_errors and opts.mode != .autocorrect) std.process.exit(1);
+}
+
+fn runParallel(
+    gpa: std.mem.Allocator,
+    io: Io,
+    opts: cli.Options,
+    files: []const file_list_mod.FileInfo,
+    id_to_ptr: *const [num_wordlist_ids]*const wordlist_mod.Wordlist,
+    project_wordlists: []const wordlist_mod.Wordlist,
+    config: *const config_mod.Config,
+    rep: *reporter_mod.Reporter,
+    found_errors: *bool,
+) !void {
+    const results = try gpa.alloc(FileResult, files.len);
+    defer gpa.free(results);
+    for (results) |*r| r.* = .{ .arena = undefined, .misses = &.{}, .done = .init(false) };
+
+    var ctx = WorkCtx{
+        .files = files,
+        .results = results,
+        .next_work = .init(0),
+        .id_to_ptr = id_to_ptr,
+        .project_wordlists = project_wordlists,
+        .config = config,
+        .io = io,
+    };
+
+    const n_threads = @min(
+        if (opts.jobs > 0) opts.jobs else (std.Thread.getCpuCount() catch 1),
+        files.len,
+    );
+
+    const threads = try gpa.alloc(std.Thread, n_threads);
+    defer gpa.free(threads);
+    var threads_spawned: usize = 0;
+    errdefer for (threads[0..threads_spawned]) |t| t.join();
+
+    for (threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, workerThread, .{&ctx});
+        threads_spawned += 1;
+    }
+
+    var next: usize = 0;
+    while (next < files.len) {
+        if (results[next].done.load(.acquire)) {
+            const fi = files[next];
+            var wl_ptrs = std.ArrayList(*const wordlist_mod.Wordlist).empty;
+            for (fi.wordlist_ids) |wid| try wl_ptrs.append(gpa, id_to_ptr[@intFromEnum(wid)]);
+
+            rep.startFile(fi.path);
+            for (results[next].misses) |miss| {
+                found_errors.* = true;
+                const action = try rep.reportMiss(miss, wl_ptrs.items);
+                switch (action) {
+                    .skip => {},
+                    .replace => |replacement| {
+                        defer gpa.free(replacement);
+                        const rfa = results[next].arena.allocator();
+                        try rewriter_mod.rewriteFile(rfa, io, fi.path, miss.token.line, miss.token.col, miss.text, replacement);
+                    },
+                    .add_to_wordlist => |lang_name| {
+                        try appendToProjectWordlist(gpa, io, lang_name, miss.text);
+                    },
+                }
+            }
+
+            wl_ptrs.deinit(gpa);
+            results[next].arena.deinit();
+            next += 1;
+        } else {
+            std.Thread.yield() catch {};
+        }
+    }
+
+    for (threads) |t| t.join();
+}
+
+fn runSequential(
+    gpa: std.mem.Allocator,
+    io: Io,
+    files: []const file_list_mod.FileInfo,
+    id_to_ptr: *const [num_wordlist_ids]*const wordlist_mod.Wordlist,
+    project_wordlists: []const wordlist_mod.Wordlist,
+    config: *const config_mod.Config,
+    rep: *reporter_mod.Reporter,
+    found_errors: *bool,
+) !void {
     for (files) |fi| {
         var wl_ptrs = std.ArrayList(*const wordlist_mod.Wordlist).empty;
         defer wl_ptrs.deinit(gpa);
@@ -84,10 +228,10 @@ pub fn main(init: std.process.Init) !void {
         defer file_arena.deinit();
         const fa = file_arena.allocator();
 
-        const misses = try checker_mod.checkFile(fa, io, fi.path, wl_ptrs.items, project_wordlists, &config);
+        const misses = try checker_mod.checkFile(fa, io, fi.path, wl_ptrs.items, project_wordlists, config);
 
         for (misses) |miss| {
-            found_errors = true;
+            found_errors.* = true;
             const action = try rep.reportMiss(miss, wl_ptrs.items);
             switch (action) {
                 .skip => {},
@@ -101,10 +245,6 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-
-    try rep.finish();
-
-    if (found_errors and opts.mode != .autocorrect) std.process.exit(1);
 }
 
 fn appendToProjectWordlist(allocator: std.mem.Allocator, io: Io, lang_name: []const u8, word: []const u8) !void {
