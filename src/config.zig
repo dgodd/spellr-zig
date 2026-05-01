@@ -83,53 +83,135 @@ pub fn loadFromFile(allocator: std.mem.Allocator, io: Io, path: []const u8) !Con
 
 fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []const u8) !void {
     var lines = std.mem.splitScalar(u8, yaml, '\n');
-    var in_excludes = false;
+
+    const Section = enum { none, excludes, languages };
+    var section: Section = .none;
+    var current_lang_idx: ?usize = null;
+    var in_lang_includes = false;
+    var in_lang_locale = false;
+
     var extra_excludes = std.ArrayList([]const u8).empty;
     defer extra_excludes.deinit(allocator);
+    var pending_includes = std.ArrayList([]const u8).empty;
 
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r ");
         if (line.len == 0 or line[0] == '#') continue;
 
-        // Any non-indented line starts a new section.
-        if (line[0] != ' ' and line[0] != '\t') {
-            in_excludes = false;
-            if (std.mem.startsWith(u8, line, "excludes:")) {
-                in_excludes = true;
-                continue;
-            }
-        }
+        var indent: usize = 0;
+        while (indent < line.len and (line[indent] == ' ' or line[indent] == '\t')) indent += 1;
+        const trimmed = line[indent..];
 
-        if (in_excludes) {
-            const trimmed = std.mem.trimStart(u8, line, " \t");
-            if (std.mem.startsWith(u8, trimmed, "- ")) {
-                const item = parseListItem(trimmed[2..]);
-                if (item.len > 0) try extra_excludes.append(allocator, try allocator.dupe(u8, item));
+        if (indent == 0) {
+            if (in_lang_includes) try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
+            section = .none;
+            current_lang_idx = null;
+            in_lang_includes = false;
+            in_lang_locale = false;
+
+            if (std.mem.startsWith(u8, trimmed, "excludes:")) {
+                section = .excludes;
+            } else if (std.mem.startsWith(u8, trimmed, "languages:")) {
+                section = .languages;
+            } else {
+                if (parseKV(trimmed, "word_minimum_length")) |v|
+                    config.word_minimum_length = std.fmt.parseInt(usize, v, 10) catch config.word_minimum_length;
+                if (parseKV(trimmed, "key_heuristic_weight")) |v|
+                    config.key_heuristic_weight = std.fmt.parseInt(u32, v, 10) catch config.key_heuristic_weight;
+                if (parseKV(trimmed, "key_minimum_length")) |v|
+                    config.key_minimum_length = std.fmt.parseInt(usize, v, 10) catch config.key_minimum_length;
             }
             continue;
         }
 
-        if (parseKV(line, "word_minimum_length")) |v|
-            config.word_minimum_length = std.fmt.parseInt(usize, v, 10) catch continue;
-        if (parseKV(line, "key_heuristic_weight")) |v|
-            config.key_heuristic_weight = std.fmt.parseInt(u32, v, 10) catch continue;
-        if (parseKV(line, "key_minimum_length")) |v|
-            config.key_minimum_length = std.fmt.parseInt(usize, v, 10) catch continue;
-        if (std.mem.indexOf(u8, line, "locale:") != null) {
-            if (parseKV(std.mem.trimStart(u8, line, " \t"), "locale")) |v| {
-                const loc = parseLocale(v);
-                for (config.languages) |*lang| {
-                    if (std.mem.eql(u8, lang.name, "english")) { lang.locale = loc; break; }
+        switch (section) {
+            .none => {},
+            .excludes => {
+                if (std.mem.startsWith(u8, trimmed, "- ")) {
+                    const item = parseListItem(trimmed[2..]);
+                    if (item.len > 0) try extra_excludes.append(allocator, try allocator.dupe(u8, item));
                 }
-            }
+            },
+            .languages => {
+                if (indent == 2 and std.mem.endsWith(u8, trimmed, ":") and !std.mem.startsWith(u8, trimmed, "-")) {
+                    // Start of a new language block.
+                    if (in_lang_includes) try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
+                    in_lang_includes = false;
+                    in_lang_locale = false;
+                    const lang_name = trimmed[0 .. trimmed.len - 1];
+                    current_lang_idx = findLangIdx(config, lang_name);
+                } else if (indent == 4) {
+                    if (in_lang_includes and !std.mem.startsWith(u8, trimmed, "-")) {
+                        try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
+                        in_lang_includes = false;
+                    }
+                    in_lang_locale = false;
+                    if (std.mem.startsWith(u8, trimmed, "includes:")) {
+                        in_lang_includes = true;
+                    } else if (std.mem.startsWith(u8, trimmed, "locale:")) {
+                        // Scalar locale: `locale: AU`
+                        if (parseKV(trimmed, "locale")) |v| {
+                            if (v.len > 0) applyLocale(config, current_lang_idx, v);
+                        } else {
+                            in_lang_locale = true; // list form: items follow at indent 6
+                        }
+                    }
+                } else if (indent >= 6) {
+                    if (in_lang_includes and std.mem.startsWith(u8, trimmed, "- ")) {
+                        const item = parseListItem(trimmed[2..]);
+                        if (item.len > 0) try pending_includes.append(allocator, try allocator.dupe(u8, item));
+                    } else if (in_lang_locale and std.mem.startsWith(u8, trimmed, "- ")) {
+                        // Take only the first locale from the list.
+                        const item = parseListItem(trimmed[2..]);
+                        if (item.len > 0) {
+                            applyLocale(config, current_lang_idx, item);
+                            in_lang_locale = false;
+                        }
+                    }
+                }
+            },
         }
     }
+
+    if (in_lang_includes) try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
+    // Discard any unflushed items (language not in config).
+    for (pending_includes.items) |item| allocator.free(item);
+    pending_includes.deinit(allocator);
 
     if (extra_excludes.items.len > 0) {
         var combined = std.ArrayList([]const u8).empty;
         try combined.appendSlice(allocator, config.excludes);
         try combined.appendSlice(allocator, extra_excludes.items);
         config.excludes = try combined.toOwnedSlice(allocator);
+    }
+}
+
+fn flushLangIncludes(allocator: std.mem.Allocator, config: *Config, lang_idx: ?usize, pending: *std.ArrayList([]const u8)) !void {
+    if (pending.items.len == 0) return;
+    if (lang_idx) |idx| {
+        config.languages[idx].includes = try pending.toOwnedSlice(allocator);
+    } else {
+        for (pending.items) |item| allocator.free(item);
+        pending.clearRetainingCapacity();
+    }
+}
+
+fn findLangIdx(config: *const Config, name: []const u8) ?usize {
+    for (config.languages, 0..) |lang, i| {
+        if (std.mem.eql(u8, lang.name, name)) return i;
+    }
+    return null;
+}
+
+fn applyLocale(config: *Config, lang_idx: ?usize, value: []const u8) void {
+    const loc = parseLocale(value);
+    if (lang_idx) |idx| {
+        if (std.mem.eql(u8, config.languages[idx].name, "english")) config.languages[idx].locale = loc;
+    } else {
+        // top-level locale or english not yet found
+        for (config.languages) |*lang| {
+            if (std.mem.eql(u8, lang.name, "english")) { lang.locale = loc; break; }
+        }
     }
 }
 
