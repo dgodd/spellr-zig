@@ -110,6 +110,3 @@ All five output modes from the Ruby gem are implemented. Interactive mode uses `
 - **No parallel processing.** The `--no-parallel` flag is accepted but has no effect; files are always checked sequentially.
 - **Single binary.** All wordlists (~786 KB of text) are embedded in the binary at compile time. The release build is ~3.7 MB.
 
-## What Zig 0.16 looked like in practice
-
-Zig 0.16.0 shipped a major I/O API change: `std.io` and `std.fs` were largely replaced by `std.Io` (capital I), which threads an `io: std.Io` value through every file operation. The `main` function signature became `pub fn main(init: std.process.Init) !void`, providing `init.gpa`, `init.arena`, `init.io`, and `init.minimal.args`. Writing this reimplementation was a useful exercise in navigating a rapidly changing standard library.
