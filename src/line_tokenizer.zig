@@ -345,19 +345,21 @@ pub const LineTokenizer = struct {
             switch (case_kind) {
                 .title => {
                     while (i < self.line.len - start and isLower(self.line[start + i])) i += 1;
-                    // optional 'word contractions
-                    while (i + 1 < self.line.len - start and
-                        isApostrophe(self.line[start + i]) and
-                        isLower(self.line[start + i + 1]))
-                    {
-                        i += utf8ApostropheLen(self.line[start + i]);
-                        while (i < self.line.len - start and isLower(self.line[start + i])) i += 1;
-                    }
+                    i = scanContractions(self.line[start..], i);
                 },
                 .upper => {
                     while (i < self.line.len - start and isUpper(self.line[start + i])) i += 1;
-                    // WORD's / WORDs (allow s at end if not followed by lower)
-                    if (i < self.line.len - start and self.line[start + i] == 's') {
+                    // If the run ends before a lowercase letter, back up one: the last uppercase
+                    // char starts the next title-case word (e.g. "PDFRenderers" → "PDF"+"Renderers").
+                    // Exception: lowercase 's' not followed by another lowercase is a plural suffix.
+                    if (i > 1 and start + i < self.line.len and isLower(self.line[start + i])) {
+                        const nc = self.line[start + i];
+                        const after = start + i + 1;
+                        const is_plural = nc == 's' and (after >= self.line.len or !isLower(self.line[after]));
+                        if (!is_plural) i -= 1;
+                    }
+                    // WORDs suffix: lowercase 's' at end not followed by lower → include it
+                    if (start + i < self.line.len and self.line[start + i] == 's') {
                         const after = start + i + 1;
                         if (after >= self.line.len or !isLower(self.line[after])) i += 1;
                     }
@@ -377,14 +379,7 @@ pub const LineTokenizer = struct {
         if (isLower(c)) {
             var i: usize = 1;
             while (i < self.line.len - start and isLower(self.line[start + i])) i += 1;
-            // contractions: don't, can't
-            while (i + 1 < self.line.len - start and
-                isApostrophe(self.line[start + i]) and
-                isLower(self.line[start + i + 1]))
-            {
-                i += utf8ApostropheLen(self.line[start + i]);
-                while (i < self.line.len - start and isLower(self.line[start + i])) i += 1;
-            }
+            i = scanContractions(self.line[start..], i);
             const word = self.line[start .. start + i];
             if (word.len >= self.word_min_len) {
                 self.pos = start + i;
@@ -416,6 +411,24 @@ pub const LineTokenizer = struct {
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────
+
+/// Extend `i` past any apostrophe-contraction groups in `word[i..]`,
+/// but stop before a possessive `'s` (apostrophe + single 's' + non-lower-or-end).
+fn scanContractions(word: []const u8, start_i: usize) usize {
+    var i = start_i;
+    while (i + 1 < word.len and isApostrophe(word[i]) and isLower(word[i + 1])) {
+        const apos_len = utf8ApostropheLen(word[i]);
+        const after_apos = i + apos_len;
+        // Stop at possessive 's: apostrophe + 's' + (end or non-lower)
+        if (after_apos < word.len and word[after_apos] == 's') {
+            const after_s = after_apos + 1;
+            if (after_s >= word.len or !isLower(word[after_s])) break;
+        }
+        i += apos_len;
+        while (i < word.len and isLower(word[i])) i += 1;
+    }
+    return i;
+}
 
 fn isAlpha(c: u8) bool {
     return std.ascii.isAlphabetic(c) or c > 0x7F;

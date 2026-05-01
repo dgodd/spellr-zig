@@ -7,7 +7,7 @@ pub const LanguageConfig = struct {
     name: []const u8,
     includes: []const []const u8,
     hashbangs: []const []const u8,
-    locale: ?Locale,
+    locales: []const Locale,
     addable: bool,
 };
 
@@ -47,17 +47,19 @@ const CSS_INCLUDES = [_][]const u8{ "*.css", "*.sass", "*.scss", "*.less" };
 const XML_INCLUDES = [_][]const u8{ "*.xml", "*.html", "*.haml", "*.hml", "*.svg" };
 const EMPTY_INCLUDES = [_][]const u8{};
 const EMPTY_HASHBANGS = [_][]const u8{};
+const DEFAULT_ENGLISH_LOCALES = [_]Locale{.US};
+const EMPTY_LOCALES = [_]Locale{};
 
 var DEFAULT_LANGUAGES = [_]LanguageConfig{
-    .{ .name = "english",    .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locale = .US,  .addable = true },
-    .{ .name = "ruby",       .includes = &RUBY_INCLUDES,        .hashbangs = &RUBY_HASHBANGS,   .locale = null, .addable = true },
-    .{ .name = "html",       .includes = &HTML_INCLUDES,        .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
-    .{ .name = "javascript", .includes = &JS_INCLUDES,          .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
-    .{ .name = "shell",      .includes = &SHELL_INCLUDES,       .hashbangs = &SHELL_HASHBANGS,  .locale = null, .addable = true },
-    .{ .name = "dockerfile", .includes = &DOCKERFILE_INCLUDES,  .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
-    .{ .name = "css",        .includes = &CSS_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
-    .{ .name = "xml",        .includes = &XML_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = true },
-    .{ .name = "spellr",     .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locale = null, .addable = false },
+    .{ .name = "english",    .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locales = &DEFAULT_ENGLISH_LOCALES, .addable = true },
+    .{ .name = "ruby",       .includes = &RUBY_INCLUDES,        .hashbangs = &RUBY_HASHBANGS,   .locales = &EMPTY_LOCALES,           .addable = true },
+    .{ .name = "html",       .includes = &HTML_INCLUDES,        .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
+    .{ .name = "javascript", .includes = &JS_INCLUDES,          .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
+    .{ .name = "shell",      .includes = &SHELL_INCLUDES,       .hashbangs = &SHELL_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
+    .{ .name = "dockerfile", .includes = &DOCKERFILE_INCLUDES,  .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
+    .{ .name = "css",        .includes = &CSS_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
+    .{ .name = "xml",        .includes = &XML_INCLUDES,         .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = true },
+    .{ .name = "spellr",     .includes = &EMPTY_INCLUDES,       .hashbangs = &EMPTY_HASHBANGS,  .locales = &EMPTY_LOCALES,           .addable = false },
 };
 
 pub fn loadDefault() Config {
@@ -93,6 +95,7 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
     var extra_excludes = std.ArrayList([]const u8).empty;
     defer extra_excludes.deinit(allocator);
     var pending_includes = std.ArrayList([]const u8).empty;
+    var pending_locales = std.ArrayList(Locale).empty;
 
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r ");
@@ -103,7 +106,7 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
         const trimmed = line[indent..];
 
         if (indent == 0) {
-            if (in_lang_includes) try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
+            try flushLang(allocator, config, current_lang_idx, &pending_includes, &pending_locales);
             section = .none;
             current_lang_idx = null;
             in_lang_includes = false;
@@ -134,49 +137,44 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
             },
             .languages => {
                 if (indent == 2 and std.mem.endsWith(u8, trimmed, ":") and !std.mem.startsWith(u8, trimmed, "-")) {
-                    // Start of a new language block.
-                    if (in_lang_includes) try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
+                    // Start of a new language block — flush the previous one.
+                    try flushLang(allocator, config, current_lang_idx, &pending_includes, &pending_locales);
                     in_lang_includes = false;
                     in_lang_locale = false;
                     const lang_name = trimmed[0 .. trimmed.len - 1];
                     current_lang_idx = findLangIdx(config, lang_name);
                 } else if (indent == 4) {
                     if (in_lang_includes and !std.mem.startsWith(u8, trimmed, "-")) {
-                        try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
                         in_lang_includes = false;
                     }
                     in_lang_locale = false;
                     if (std.mem.startsWith(u8, trimmed, "includes:")) {
                         in_lang_includes = true;
                     } else if (std.mem.startsWith(u8, trimmed, "locale:")) {
-                        // Scalar locale: `locale: AU`
+                        // Scalar form: `locale: AU`
                         if (parseKV(trimmed, "locale")) |v| {
-                            if (v.len > 0) applyLocale(config, current_lang_idx, v);
+                            if (v.len > 0) try pending_locales.append(allocator, parseLocale(v));
                         } else {
-                            in_lang_locale = true; // list form: items follow at indent 6
+                            in_lang_locale = true; // list form follows at indent 6
                         }
                     }
-                } else if (indent >= 6) {
-                    if (in_lang_includes and std.mem.startsWith(u8, trimmed, "- ")) {
-                        const item = parseListItem(trimmed[2..]);
-                        if (item.len > 0) try pending_includes.append(allocator, try allocator.dupe(u8, item));
-                    } else if (in_lang_locale and std.mem.startsWith(u8, trimmed, "- ")) {
-                        // Take only the first locale from the list.
-                        const item = parseListItem(trimmed[2..]);
-                        if (item.len > 0) {
-                            applyLocale(config, current_lang_idx, item);
-                            in_lang_locale = false;
-                        }
+                } else if (indent >= 6 and std.mem.startsWith(u8, trimmed, "- ")) {
+                    const item = parseListItem(trimmed[2..]);
+                    if (item.len == 0) {} else if (in_lang_includes) {
+                        try pending_includes.append(allocator, try allocator.dupe(u8, item));
+                    } else if (in_lang_locale) {
+                        try pending_locales.append(allocator, parseLocale(item));
                     }
                 }
             },
         }
     }
 
-    if (in_lang_includes) try flushLangIncludes(allocator, config, current_lang_idx, &pending_includes);
-    // Discard any unflushed items (language not in config).
+    try flushLang(allocator, config, current_lang_idx, &pending_includes, &pending_locales);
+    // Discard unflushed items (language not in config).
     for (pending_includes.items) |item| allocator.free(item);
     pending_includes.deinit(allocator);
+    pending_locales.deinit(allocator);
 
     if (extra_excludes.items.len > 0) {
         var combined = std.ArrayList([]const u8).empty;
@@ -186,14 +184,28 @@ fn parseYamlOverrides(allocator: std.mem.Allocator, config: *Config, yaml: []con
     }
 }
 
-fn flushLangIncludes(allocator: std.mem.Allocator, config: *Config, lang_idx: ?usize, pending: *std.ArrayList([]const u8)) !void {
-    if (pending.items.len == 0) return;
+fn flushLang(
+    allocator: std.mem.Allocator,
+    config: *Config,
+    lang_idx: ?usize,
+    pending_includes: *std.ArrayList([]const u8),
+    pending_locales: *std.ArrayList(Locale),
+) !void {
     if (lang_idx) |idx| {
-        config.languages[idx].includes = try pending.toOwnedSlice(allocator);
+        if (pending_includes.items.len > 0) {
+            var combined = std.ArrayList([]const u8).empty;
+            try combined.appendSlice(allocator, config.languages[idx].includes);
+            try combined.appendSlice(allocator, pending_includes.items);
+            config.languages[idx].includes = try combined.toOwnedSlice(allocator);
+            pending_includes.clearRetainingCapacity();
+        }
+        if (pending_locales.items.len > 0 and std.mem.eql(u8, config.languages[idx].name, "english"))
+            config.languages[idx].locales = try pending_locales.toOwnedSlice(allocator);
     } else {
-        for (pending.items) |item| allocator.free(item);
-        pending.clearRetainingCapacity();
+        for (pending_includes.items) |item| allocator.free(item);
+        pending_includes.clearRetainingCapacity();
     }
+    pending_locales.clearRetainingCapacity();
 }
 
 fn findLangIdx(config: *const Config, name: []const u8) ?usize {
@@ -201,18 +213,6 @@ fn findLangIdx(config: *const Config, name: []const u8) ?usize {
         if (std.mem.eql(u8, lang.name, name)) return i;
     }
     return null;
-}
-
-fn applyLocale(config: *Config, lang_idx: ?usize, value: []const u8) void {
-    const loc = parseLocale(value);
-    if (lang_idx) |idx| {
-        if (std.mem.eql(u8, config.languages[idx].name, "english")) config.languages[idx].locale = loc;
-    } else {
-        // top-level locale or english not yet found
-        for (config.languages) |*lang| {
-            if (std.mem.eql(u8, lang.name, "english")) { lang.locale = loc; break; }
-        }
-    }
 }
 
 fn parseListItem(s: []const u8) []const u8 {

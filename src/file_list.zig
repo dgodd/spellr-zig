@@ -124,19 +124,20 @@ pub const FileList = struct {
     fn fileInfo(self: *FileList, path: []const u8) !?FileInfo {
         var ids = std.ArrayList(WordlistId).empty;
 
-        // always add english + locale wordlists
-        const english_locale: Locale = blk: {
-            for (self.config.languages) |lang| {
-                if (std.mem.eql(u8, lang.name, "english")) break :blk lang.locale orelse .US;
-            }
-            break :blk .US;
-        };
+        // always add english + all applicable locale wordlists
+        var english_locales: []const Locale = &.{.US};
+        for (self.config.languages) |lang| {
+            if (std.mem.eql(u8, lang.name, "english")) { english_locales = lang.locales; break; }
+        }
         try ids.append(self.allocator, .english);
-        const locale_id: WordlistId = switch (english_locale) {
-            .US => .english_us, .AU => .english_au, .CA => .english_ca,
-            .GB => .english_gb, .GBs => .english_gbs, .GBz => .english_gbz,
-        };
-        try ids.append(self.allocator, locale_id);
+        for (english_locales) |loc| {
+            const locale_id: WordlistId = switch (loc) {
+                .US => .english_us, .AU => .english_au, .CA => .english_ca,
+                .GB => .english_gb, .GBs => .english_gbs, .GBz => .english_gbz,
+            };
+            if (!containsId(ids.items, locale_id)) try ids.append(self.allocator, locale_id);
+        }
+        const baseline_len = ids.items.len; // english + locale(s), before any language match
 
         // match language-specific wordlists
         const base = std.fs.path.basename(path);
@@ -157,7 +158,7 @@ pub const FileList = struct {
         }
 
         // No language matched — skip the file (English only applies alongside a matched language)
-        if (ids.items.len == 2) {
+        if (ids.items.len == baseline_len) {
             ids.deinit(self.allocator);
             return null;
         }
