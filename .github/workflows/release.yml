@@ -27,8 +27,6 @@ jobs:
           mv zig-out/bin/spellr spellr-linux-x86_64
           zig build -Doptimize=ReleaseFast -Dtarget=aarch64-macos
           mv zig-out/bin/spellr spellr-macos-aarch64
-          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-windows
-          mv zig-out/bin/spellr.exe spellr-windows-x86_64.exe
 
       - name: Upload binaries to release
         uses: softprops/action-gh-release@v2
@@ -36,5 +34,4 @@ jobs:
           files: |
             spellr-linux-x86_64
             spellr-macos-aarch64
-            spellr-windows-x86_64.exe
           fail_on_unmatched_files: true
